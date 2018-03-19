@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data.Objects.DataClasses;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -19,22 +21,23 @@ namespace TreeMap
         public static char PathSep = System.IO.Path.DirectorySeparatorChar;
         public static string DataSuffix = "*" + PathSep; // a node whose size consists of files in the node (excluding children)
         public TextBlock _txtStatus;
-        public string _rootPath = @"C:\Program Files";
+        public string _rootPath;
         public Rect _rootRect;
         public long _rootSize;
-        public Dictionary<string, MapDataItem> _DataDict = new Dictionary<string, MapDataItem>();
+        public ConcurrentDictionary<string, MapDataItem> _DataDict = new ConcurrentDictionary<string, MapDataItem>();
 
         public MainWindow()
         {
             InitializeComponent();
             this.WindowState = WindowState.Maximized;
             _txtStatus = new TextBlock();
+            Title = "Treemap by Calvin Hsia";
             this.Content = _txtStatus;
-            this.Loaded += (object o, RoutedEventArgs e) =>
+            this.Loaded += async (object o, RoutedEventArgs e) =>
             { // run this after the window has been initialized:
                 var fldrDialog = new System.Windows.Forms.FolderBrowserDialog();
                 fldrDialog.Description = @"Choose a root folder. A small subtree will be faster, like c:\Program Files";
-                fldrDialog.SelectedPath = _rootPath;
+                fldrDialog.SelectedPath = Environment.CurrentDirectory;
                 if (fldrDialog.ShowDialog(this) != System.Windows.Forms.DialogResult.OK)
                 {
                     Application.Current.Shutdown();
@@ -44,21 +47,16 @@ namespace TreeMap
                 {
                     _rootPath += PathSep;// need a trailing backslash to distinguish dir name matches
                 }
-                var bgdWorkerThread = new BackgroundWorker(); // create thread to read disk
-                bgdWorkerThread.DoWork += (object sender, DoWorkEventArgs args) =>
-                {
-                    _rootSize = FillDictionary(_rootPath);
-                };
-                bgdWorkerThread.RunWorkerCompleted += (object sender, RunWorkerCompletedEventArgs args) =>
-                {
-                    var totNumFiles = _DataDict.Values.Sum(x => x.NumFiles);
-                    this.Title = string.Format("{0} Size = {1:n0}  # Files={2:n0}  # Items = {3:n0}", _rootPath, _rootSize, totNumFiles, _DataDict.Count()); ;
-                    _rootRect = new Rect(0, 0,
-                        this.ActualWidth,
-                        this.ActualHeight);
-                    this.Content = new TreeMap(this, _rootPath, _rootSize);
-                };
-                bgdWorkerThread.RunWorkerAsync();
+                var startTime = DateTime.Now;
+                _rootSize = await FillDictionaryAsync(_rootPath);
+                var totNumFiles = _DataDict.Values.Sum(x => x.NumFiles);
+                this.Title += string.Format(" {0} Size = {1:n0}  # Files={2:n0}  # Items = {3:n0}", _rootPath, _rootSize, totNumFiles, _DataDict.Count()); ;
+                _rootRect = new Rect(0, 0,
+                    this.ActualWidth,
+                    this.ActualHeight);
+                this.Content = new TreeMap(this, _rootPath, _rootSize);
+                var elapsed = DateTime.Now - startTime;
+                this.Title += $" Calculated in {elapsed.TotalMinutes:n1} minutes";
             };
         }
 
@@ -74,69 +72,74 @@ namespace TreeMap
                 return string.Format("Depth = {0} Size = {1:n0}, NumFiles = {2:n0} Index = {3:n0}", Depth, Size, NumFiles, Index);
             }
         }
-        public long FillDictionary(string cPath) // includes trailing "\"
+        public async Task<long> FillDictionaryAsync(string cPath) // includes trailing "\"
         { // runs on background thread
             long totalSize = 0;
             long curdirFileSize = 0;
             long curdirFolderSize = 0;
-            try
+            await Task.Run(async () =>
             {
-                if (_DataDict.Count() % 100 == 0)
-                { // upgrade status on foreground thread
-                    _txtStatus.Dispatcher.BeginInvoke(
-                        DispatcherPriority.Normal,
-                        new Action<TextBlock>(otxtblk =>
+                try
+                {
+                    if (_DataDict.Count() % 100 == 0)
+                    { // upgrade status on foreground thread
+                        _txtStatus.Dispatcher.Invoke(
+                            DispatcherPriority.Normal,
+                            new Action<TextBlock>(otxtblk =>
+                            {
+                                otxtblk.Text = cPath; // update status
+                            }
+                                ),
+                            _txtStatus);
+                    }
+                    var dirInfo = new DirectoryInfo(cPath);
+                    if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+                    { // some folders are not really there: they're redirect junction points.
+                        
+                        return ;
+                    }
+                    var nDepth = cPath.Where(c => c == PathSep).Count();
+                    var curDirFiles = Directory.GetFiles(cPath);
+                    if (curDirFiles.Length > 0) // if cur folder contains any files (not dirs)
+                    {
+                        foreach (var file in curDirFiles)
                         {
-                            otxtblk.Text = cPath; // update status
+                            var finfo = new FileInfo(file);
+                            curdirFileSize += finfo.Length;
                         }
-                            ),
-                        _txtStatus);
-                }
-                var dirInfo = new DirectoryInfo(cPath);
-                if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
-                { // some folders are not really there: they're redirect junction points.
-                    return 0;
-                }
-                var nDepth = cPath.Where(c => c == PathSep).Count();
-                var curDirFiles = Directory.GetFiles(cPath);
-                if (curDirFiles.Length > 0) // if cur folder contains any files (not dirs)
-                {
-                    foreach (var file in curDirFiles)
-                    {
-                        var finfo = new FileInfo(file);
-                        curdirFileSize += finfo.Length;
+                        _DataDict[cPath + DataSuffix] = // size of files in cur folder, excluding children
+                             new MapDataItem()
+                             {
+                                 Depth = nDepth + 1,
+                                 Size = curdirFileSize,
+                                 NumFiles = curDirFiles.Length,
+                                 Index = _DataDict.Count
+                             };
                     }
-                    _DataDict.Add(cPath + DataSuffix, // size of files in cur folder, excluding children
-                         new MapDataItem()
-                         {
-                             Depth = nDepth + 1,
-                             Size = curdirFileSize,
-                             NumFiles = curDirFiles.Length,
-                             Index = _DataDict.Count
-                         });
-                }
-                var curDirFolders = Directory.GetDirectories(cPath); // now any subfolders
-                if (curDirFolders.Length > 0)
-                {
-                    foreach (var dir in curDirFolders)
+                    var curDirFolders = Directory.GetDirectories(cPath); // now any subfolders
+                    if (curDirFolders.Length > 0)
                     {
-                        curdirFolderSize += FillDictionary(System.IO.Path.Combine(cPath, dir) + PathSep); // recur
+                        foreach (var dir in curDirFolders)
+                        {
+                            curdirFolderSize += await FillDictionaryAsync(System.IO.Path.Combine(cPath, dir) + PathSep); // recur
+                        }
+                    }
+                    totalSize += curdirFileSize + curdirFolderSize;
+                    _DataDict[cPath] = new MapDataItem() { Depth = nDepth, Size = curdirFileSize + curdirFolderSize, Index = _DataDict.Count };
+                }
+                catch (Exception ex)
+                {
+                    if (ex is UnauthorizedAccessException)
+                    {
+                        System.Diagnostics.Trace.WriteLine("Ex: " + ex.Message);
+                    }
+                    else
+                    {
+                        throw;
                     }
                 }
-                totalSize += curdirFileSize + curdirFolderSize;
-                _DataDict.Add(cPath, new MapDataItem() { Depth = nDepth, Size = curdirFileSize + curdirFolderSize, Index = _DataDict.Count });
-            }
-            catch (Exception ex)
-            {
-                if (ex is UnauthorizedAccessException)
-                {
-                    System.Diagnostics.Trace.WriteLine("Ex: " + ex.Message);
-                }
-                else
-                {
-                    throw;
-                }
-            }
+
+            });
             return totalSize;
         }
 
