@@ -104,8 +104,18 @@ namespace TreeMap
                     {
                         foreach (var file in curDirFiles)
                         {
-                            var finfo = new FileInfo(file);
-                            curdirFileSize += finfo.Length;
+                            /*
+C:\Users\calvinh\AppData\Local\Packages\WINSTO~1\LOCALS~1\Cache\0\0-DevApps-https∺∯∯next-services.apps.microsoft.com∯search∯6.3.9600-0∯788∯en-US_en-US∯c∯US∯cp∯10005001∯DevApps∯pc∯0∯pt∯x64∯af∯0∯lf∯1∯pn∯1∿developerName=Microsoft%20Corporation.dat
+C:\Users\calvinh\AppData\Local\Packages\winstore_cw5n1h2txyewy\LocalState\Cache\0\0-DevApps-https∺∯∯next-services.apps.microsoft.com∯search∯6.3.9600-0∯788∯en-US_en-US∯c∯US∯cp∯10005001∯DevApps∯pc∯0∯pt∯x64∯af∯0∯lf∯1∯pn∯1∿developerName=Microsoft%20Corporation.dat
+                              */
+                            try
+                            {
+                                var finfo = new FileInfo(file);
+                                curdirFileSize += finfo.Length;
+                            }
+                            catch (PathTooLongException)
+                            {
+                            }
                         }
                         _DataDict[cPath + DataSuffix] = // size of files in cur folder, excluding children
                              new MapDataItem()
