@@ -35,14 +35,23 @@ namespace TreeMap
             this.Content = _txtStatus;
             this.Loaded += async (object o, RoutedEventArgs e) =>
             { // run this after the window has been initialized:
-                var fldrDialog = new System.Windows.Forms.FolderBrowserDialog();
-                fldrDialog.Description = @"Choose a root folder. A small subtree will be faster, like c:\Program Files";
-                fldrDialog.SelectedPath = Environment.CurrentDirectory;
-                if (fldrDialog.ShowDialog(this) != System.Windows.Forms.DialogResult.OK)
+
+                var args = Environment.GetCommandLineArgs(); // 1st is fullpath to exe
+                if (args.Length > 1 && Directory.Exists(args[1]))
                 {
-                    Application.Current.Shutdown();
+                    _rootPath = args[1];
                 }
-                _rootPath = fldrDialog.SelectedPath;
+                else
+                {
+                    var fldrDialog = new System.Windows.Forms.FolderBrowserDialog();
+                    fldrDialog.Description = @"Choose a root folder. A small subtree will be faster, like c:\Program Files";
+                    fldrDialog.SelectedPath = Environment.CurrentDirectory;
+                    if (fldrDialog.ShowDialog(this) != System.Windows.Forms.DialogResult.OK)
+                    {
+                        Application.Current.Shutdown();
+                    }
+                    _rootPath = fldrDialog.SelectedPath;
+                }
                 if (!_rootPath.EndsWith(MainWindow.PathSep.ToString()))
                 {
                     _rootPath += PathSep;// need a trailing backslash to distinguish dir name matches
@@ -95,8 +104,8 @@ namespace TreeMap
                     var dirInfo = new DirectoryInfo(cPath);
                     if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
                     { // some folders are not really there: they're redirect junction points.
-                        
-                        return ;
+
+                        return;
                     }
                     var nDepth = cPath.Where(c => c == PathSep).Count();
                     var curDirFiles = Directory.GetFiles(cPath);
