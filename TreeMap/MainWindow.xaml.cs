@@ -52,6 +52,7 @@ namespace TreeMap
                     }
                     _rootPath = fldrDialog.SelectedPath;
                 }
+                _rootPath = new DirectoryInfo(_rootPath).FullName;
                 if (!_rootPath.EndsWith(MainWindow.PathSep.ToString()))
                 {
                     _rootPath += PathSep;// need a trailing backslash to distinguish dir name matches
