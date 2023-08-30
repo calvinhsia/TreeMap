@@ -147,6 +147,10 @@ C:\Users\calvinh\AppData\Local\Packages\winstore_cw5n1h2txyewy\LocalState\Cache\
                     totalSize += curdirFileSize + curdirFolderSize;
                     _DataDict[cPath] = new MapDataItem() { Depth = nDepth, Size = curdirFileSize + curdirFolderSize, Index = _DataDict.Count };
                 }
+                catch (PathTooLongException)
+                {
+
+                }
                 catch (Exception ex)
                 {
                     if (ex is UnauthorizedAccessException)
@@ -366,7 +370,7 @@ C:\Users\calvinh\AppData\Local\Packages\winstore_cw5n1h2txyewy\LocalState\Cache\
                             }
                             catch (Exception)
                             {
-                                throw;
+//                                throw;
                             }
                             finally
                             {
