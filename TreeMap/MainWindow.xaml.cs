@@ -13,9 +13,11 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Runtime.Versioning;
 
 namespace TreeMap
 {
+    [SupportedOSPlatform("windows")]
     public partial class MainWindow : Window, System.Windows.Forms.IWin32Window
     {
         public static char PathSep = System.IO.Path.DirectorySeparatorChar;
