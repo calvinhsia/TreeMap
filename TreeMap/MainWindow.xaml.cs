@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data.Objects.DataClasses;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -306,7 +306,14 @@ C:\Users\calvinh\AppData\Local\Packages\winstore_cw5n1h2txyewy\LocalState\Cache\
                                         {
                                             subDir = subDir.Substring(0, ndx - 1);
                                         }
-                                        System.Diagnostics.Process.Start(subDir);
+                                        try
+                                        {
+                                            Process.Start(new ProcessStartInfo { FileName = subDir, UseShellExecute = true });
+                                        }
+                                        catch (Exception)
+                                        {
+                                            // ignore failures to launch explorer
+                                        }
                                         break;
                                     case "_SubTreeMap":
                                         {
@@ -449,7 +456,9 @@ C:\Users\calvinh\AppData\Local\Packages\winstore_cw5n1h2txyewy\LocalState\Cache\
             var members = ienum.GetGenericArguments()[0].GetMembers().Where(m => m.MemberType == System.Reflection.MemberTypes.Property);
             foreach (var mbr in members)
             {
-                if (mbr.DeclaringType == typeof(EntityObject)) // if using Entity framework, filter out EntityKey, etc.
+                // if using Entity Framework, filter out EntityKey, etc. Use a string check so we don't need EF reference
+                if (mbr.DeclaringType != null &&
+                    (mbr.DeclaringType.FullName == "System.Data.Objects.DataClasses.EntityObject" || mbr.DeclaringType.Name == "EntityObject"))
                 {
                     continue;
                 }
