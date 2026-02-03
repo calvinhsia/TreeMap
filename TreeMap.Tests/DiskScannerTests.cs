@@ -23,16 +23,16 @@ public class DiskScannerTests
 
             var dict = DiskScanner.Scan(root);
             // ensure keys with trailing sep exist
-            var rootKey = root.EndsWith(MainWindow.PathSep.ToString()) ? root : root + MainWindow.PathSep;
-            var subKey = rootKey + "subfolder" + MainWindow.PathSep;
+            var rootKey = root.EndsWith(TreeMap.TreeMapConstants.PathSep.ToString()) ? root : root + TreeMap.TreeMapConstants.PathSep;
+            var subKey = rootKey + "subfolder" + TreeMap.TreeMapConstants.PathSep;
 
             Assert.True(dict.ContainsKey(rootKey));
             Assert.True(dict.ContainsKey(subKey));
-            Assert.True(dict.ContainsKey(subKey + MainWindow.DataSuffix));
+            Assert.True(dict.ContainsKey(subKey + TreeMap.TreeMapConstants.DataSuffix));
 
             var rootItem = dict[rootKey];
             var subItem = dict[subKey];
-            var subFilesItem = dict[subKey + MainWindow.DataSuffix];
+            var subFilesItem = dict[subKey + TreeMap.TreeMapConstants.DataSuffix];
 
             Assert.Equal(11, rootItem.Size); // 5 + 6
             Assert.Equal(6, subFilesItem.Size);

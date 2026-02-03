@@ -9,14 +9,14 @@ public class MapDataItemTests
     [Fact]
     public void PathSepAndDataSuffix_AreCorrect()
     {
-        Assert.Equal(Path.DirectorySeparatorChar, MainWindow.PathSep);
-        Assert.Equal("*" + Path.DirectorySeparatorChar, MainWindow.DataSuffix);
+        Assert.Equal(Path.DirectorySeparatorChar, TreeMap.TreeMapConstants.PathSep);
+        Assert.Equal("*" + Path.DirectorySeparatorChar, TreeMap.TreeMapConstants.DataSuffix);
     }
 
     [Fact]
     public void MapDataItem_ToString_IncludesFields()
     {
-        var item = new MainWindow.MapDataItem()
+        var item = new TreeMap.MapDataItem()
         {
             Depth = 2,
             Size = 100,

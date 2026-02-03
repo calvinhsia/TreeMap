@@ -9,79 +9,91 @@ namespace TreeMap
     // Simple, testable scanner that mirrors the directory scanning logic from MainWindow
     public static class DiskScanner
     {
-        public static ConcurrentDictionary<string, MainWindow.MapDataItem> Scan(string rootPath)
+        public static ConcurrentDictionary<string, MapDataItem> Scan(string rootPath)
         {
-            var dict = new ConcurrentDictionary<string, MainWindow.MapDataItem>();
-            if (!rootPath.EndsWith(MainWindow.PathSep.ToString()))
-            {
-                rootPath += MainWindow.PathSep;
-            }
-            // run synchronously but use recursion
-            ScanInternal(rootPath, dict).GetAwaiter().GetResult();
-            return dict;
+            // backward-compatible synchronous API; run the async scan and wait
+            return ScanAsync(rootPath, null, default).GetAwaiter().GetResult();
         }
 
-        private static async Task<long> ScanInternal(string cPath, ConcurrentDictionary<string, MainWindow.MapDataItem> dict)
+        public static Task<ConcurrentDictionary<string, MapDataItem>> ScanAsync(string rootPath, IProgress<string>? progress = null, System.Threading.CancellationToken cancellationToken = default)
+        {
+            var dict = new ConcurrentDictionary<string, MapDataItem>();
+            if (!rootPath.EndsWith(TreeMapConstants.PathSep.ToString()))
+            {
+                rootPath += TreeMapConstants.PathSep;
+            }
+
+            // Run the recursive scan on a background thread to avoid blocking the caller
+            return Task.Run(async () =>
+            {
+                await ScanInternal(rootPath, dict, progress, cancellationToken).ConfigureAwait(false);
+                return dict;
+            }, cancellationToken);
+        }
+
+        private static async Task<long> ScanInternal(string cPath, ConcurrentDictionary<string, MapDataItem> dict, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken)
         {
             long totalSize = 0;
             long curdirFileSize = 0;
             long curdirFolderSize = 0;
 
-            await Task.Run(async () =>
+            // Check cancellation and report progress
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(cPath);
+
+            var dirInfo = new DirectoryInfo(cPath);
+            if (!dirInfo.Exists)
+                return 0;
+            if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
             {
-                var dirInfo = new DirectoryInfo(cPath);
-                if (!dirInfo.Exists)
-                    return;
-                if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+                return 0;
+            }
+            var nDepth = cPath.Where(c => c == TreeMapConstants.PathSep).Count();
+            string[] curDirFiles = Array.Empty<string>();
+            try
+            {
+                curDirFiles = Directory.GetFiles(cPath);
+            }
+            catch (UnauthorizedAccessException) { return 0; }
+            if (curDirFiles.Length > 0)
+            {
+                foreach (var file in curDirFiles)
                 {
-                    return;
-                }
-                var nDepth = cPath.Where(c => c == MainWindow.PathSep).Count();
-                var curDirFiles = Array.Empty<string>();
-                try
-                {
-                    curDirFiles = Directory.GetFiles(cPath);
-                }
-                catch (UnauthorizedAccessException) { return; }
-                if (curDirFiles.Length > 0)
-                {
-                    foreach (var file in curDirFiles)
+                    try
                     {
-                        try
-                        {
-                            var finfo = new FileInfo(file);
-                            curdirFileSize += finfo.Length;
-                        }
-                        catch (PathTooLongException) { }
+                        var finfo = new FileInfo(file);
+                        curdirFileSize += finfo.Length;
                     }
-                    dict[cPath + MainWindow.DataSuffix] = new MainWindow.MapDataItem()
-                    {
-                        Depth = nDepth + 1,
-                        Size = curdirFileSize,
-                        NumFiles = curDirFiles.Length,
-                        Index = dict.Count
-                    };
+                    catch (PathTooLongException) { }
                 }
-                string[] curDirFolders = Array.Empty<string>();
-                try
+                dict[cPath + TreeMapConstants.DataSuffix] = new MapDataItem()
                 {
-                    curDirFolders = Directory.GetDirectories(cPath);
-                }
-                catch (UnauthorizedAccessException) { }
-                if (curDirFolders.Length > 0)
+                    Depth = nDepth + 1,
+                    Size = curdirFileSize,
+                    NumFiles = curDirFiles.Length,
+                    Index = dict.Count
+                };
+            }
+            string[] curDirFolders = Array.Empty<string>();
+            try
+            {
+                curDirFolders = Directory.GetDirectories(cPath);
+            }
+            catch (UnauthorizedAccessException) { }
+            if (curDirFolders.Length > 0)
+            {
+                foreach (var dir in curDirFolders)
                 {
-                    foreach (var dir in curDirFolders)
-                    {
-                        // ensure trailing sep
-                        var childPath = Path.Combine(cPath, Path.GetFileName(dir));
-                        if (!childPath.EndsWith(MainWindow.PathSep.ToString()))
-                            childPath += MainWindow.PathSep;
-                        curdirFolderSize += await ScanInternal(childPath, dict);
-                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    // ensure trailing sep
+                    var childPath = Path.Combine(cPath, Path.GetFileName(dir));
+                    if (!childPath.EndsWith(TreeMapConstants.PathSep.ToString()))
+                        childPath += TreeMapConstants.PathSep;
+                    curdirFolderSize += await ScanInternal(childPath, dict, progress, cancellationToken).ConfigureAwait(false);
                 }
-                totalSize += curdirFileSize + curdirFolderSize;
-                dict[cPath] = new MainWindow.MapDataItem() { Depth = nDepth, Size = curdirFileSize + curdirFolderSize, Index = dict.Count };
-            });
+            }
+            totalSize += curdirFileSize + curdirFolderSize;
+            dict[cPath] = new MapDataItem() { Depth = nDepth, Size = curdirFileSize + curdirFolderSize, Index = dict.Count };
 
             return totalSize;
         }

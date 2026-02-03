@@ -3,9 +3,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
-    <UseWindowsForms>true</UseWindowsForms>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>TreeMap</RootNamespace>
     <AssemblyName>TreeMap</AssemblyName>
     <LangVersion>latest</LangVersion>
@@ -15,11 +13,27 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.9" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.9" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.9" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.9" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.9" Condition="'$(Configuration)' == 'Debug'" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Remove="App.config" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Rely on SDK implicit items for Compile, Page, ApplicationDefinition and EmbeddedResource -->
   </ItemGroup>
+
+  <!-- Avalonia .axaml files are included implicitly by the SDK -->
+
+  <!-- Exclude WPF files now replaced by Avalonia equivalents -->
+
 
 </Project>
