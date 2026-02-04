@@ -129,6 +129,9 @@ public partial class MainWindow : Window
             var newText = showFileList ? "Show Treemap" : "Show File List";
             if (toggleViewBtn != null) toggleViewBtn.Content = newText;
             if (toggleBrowseMenuItem != null) toggleBrowseMenuItem.Header = newText;
+            // Update the file list context menu too
+            var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
+            if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
         };
 
         // Wire up toggle button
@@ -137,10 +140,15 @@ public partial class MainWindow : Window
             toggleViewBtn.Click += (s, args) => toggleView();
         }
 
-        // Wire up context menu item
+        // Wire up context menu items (both treemap and file list)
         if (toggleBrowseMenuItem != null)
         {
             toggleBrowseMenuItem.Click += (s, args) => toggleView();
+        }
+        var toggleTreemapMenuItemInit = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
+        if (toggleTreemapMenuItemInit != null)
+        {
+            toggleTreemapMenuItemInit.Click += (s, args) => toggleView();
         }
 
         // Use the Border (TreeCanvasHost) to detect valid bounds since Canvas doesn't stretch

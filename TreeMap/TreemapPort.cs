@@ -69,11 +69,15 @@ public static class TreemapPort
             ToolTip.SetTip(rect, $"{key}\n{sizeStr}{cloudInfo}");
             rect.PointerPressed += (s, e) =>
             {
-                // on click, just redraw treemap for this node (drill down)
-                canvas.Children.Clear();
-                long childTotal = dict.ContainsKey(key) ? dict[key].Size : size;
-                MakeTreemap(dict, canvas, key, new Rect(0, 0, canvas.Bounds.Width, canvas.Bounds.Height), childTotal, !horizontal);
-                e.Handled = true;
+                // Only drill down on LEFT click, not right click (which opens context menu)
+                if (e.GetCurrentPoint(rect).Properties.IsLeftButtonPressed)
+                {
+                    // on click, just redraw treemap for this node (drill down)
+                    canvas.Children.Clear();
+                    long childTotal = dict.ContainsKey(key) ? dict[key].Size : size;
+                    MakeTreemap(dict, canvas, key, new Rect(0, 0, canvas.Bounds.Width, canvas.Bounds.Height), childTotal, !horizontal);
+                    e.Handled = true;
+                }
             };
 
             Canvas.SetLeft(rect, r.X);

@@ -24,7 +24,13 @@
         <!-- Content area - either treemap or file list (full window each) -->
         <Grid Name="ContentGrid" Grid.Row="1">
             <!-- File list - hidden by default, takes full space when shown -->
-            <ContentControl Name="LeftHost" Background="#FFF8F8F8" IsVisible="False" />
+            <ContentControl Name="LeftHost" Background="#FFF8F8F8" IsVisible="False">
+                <ContentControl.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Name="ToggleTreemapMenuItem" Header="Show Treemap" />
+                    </ContextMenu>
+                </ContentControl.ContextMenu>
+            </ContentControl>
             <!-- Treemap - visible by default, takes full space -->
             <Border Name="TreeCanvasHost" Background="#FFFFFFFF" ClipToBounds="True">
                 <Canvas Name="TreeCanvas">
