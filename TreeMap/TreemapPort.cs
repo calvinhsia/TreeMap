@@ -46,15 +46,27 @@ public static class TreemapPort
             var fillBrush = new SolidColorBrush(fillColor);
             var rectW = r.Width < 0 ? 0 : r.Width;
             var rectH = r.Height < 0 ? 0 : r.Height;
+
+            // Check if this item contains cloud-only files
+            var isCloudItem = dict.ContainsKey(key) && dict[key].IsCloudOnly;
+            var strokeBrush = isCloudItem ? Brushes.Cyan : Brushes.Black;
+            var strokeThickness = isCloudItem ? 3.0 : 1.0;
+
             var rect = new Avalonia.Controls.Shapes.Rectangle
             {
                 Fill = fillBrush,
                 Width = rectW,
                 Height = rectH,
-                Stroke = Brushes.Black,
-                StrokeThickness = 1
+                Stroke = strokeBrush,
+                StrokeThickness = strokeThickness
             };
             rect.DataContext = key;
+            // Tooltip shows full path and size (and cloud status)
+            var sizeStr = size >= 1_000_000_000 ? $"{size / 1_000_000_000.0:F2} GB" :
+                          size >= 1_000_000 ? $"{size / 1_000_000.0:F2} MB" :
+                          size >= 1_000 ? $"{size / 1_000.0:F2} KB" : $"{size} bytes";
+            var cloudInfo = isCloudItem ? $"\n☁ Contains {dict[key].CloudFileCount} cloud file(s)" : "";
+            ToolTip.SetTip(rect, $"{key}\n{sizeStr}{cloudInfo}");
             rect.PointerPressed += (s, e) =>
             {
                 // on click, just redraw treemap for this node (drill down)
@@ -68,12 +80,33 @@ public static class TreemapPort
             Canvas.SetTop(rect, r.Y);
             canvas.Children.Add(rect);
 
-            if (r.Width > 30 && r.Height > 16)
+            // Add text label - show full path like WPF version
+            // Use vertical text for tall narrow rectangles
+            if (r.Width > 20 && r.Height > 14)
             {
-                var txt = new TextBlock { Text = System.IO.Path.GetFileName(key.TrimEnd(TreeMapConstants.PathSep)), Foreground = Brushes.Black };
+                var txt = new TextBlock
+                { 
+                    Text = key, // Full path
+                    Foreground = Brushes.Black,
+                    TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+                };
                 txt.DataContext = key;
-                Canvas.SetLeft(txt, r.X + 4);
-                Canvas.SetTop(txt, r.Y + 4);
+                
+                // Rotate text 90 degrees for tall narrow rectangles (height > width)
+                if (r.Height > r.Width * 1.5 && r.Height > 60)
+                {
+                    txt.RenderTransform = new RotateTransform(90);
+                    txt.RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative);
+                    txt.MaxWidth = r.Height - 8; // Use height as max width since rotated
+                    Canvas.SetLeft(txt, r.X + 14);
+                    Canvas.SetTop(txt, r.Y + 4);
+                }
+                else
+                {
+                    txt.MaxWidth = r.Width - 8;
+                    Canvas.SetLeft(txt, r.X + 4);
+                    Canvas.SetTop(txt, r.Y + 4);
+                }
                 canvas.Children.Add(txt);
             }
 

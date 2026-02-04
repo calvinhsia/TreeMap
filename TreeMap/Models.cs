@@ -19,6 +19,8 @@ namespace TreeMap
         public int NumFiles;
         public int Index;
         public Rect rect;
-        public override string ToString() => $"Depth = {Depth} Size = {Size:n0}, NumFiles = {NumFiles:n0} Index = {Index:n0}";
+        public bool IsCloudOnly; // True if this directory contains any cloud-only files
+        public int CloudFileCount; // Number of cloud-only files in this directory
+        public override string ToString() => $"Depth = {Depth} Size = {Size:n0}, NumFiles = {NumFiles:n0} Index = {Index:n0} Cloud = {IsCloudOnly} CloudCount = {CloudFileCount}";
     }
 }
