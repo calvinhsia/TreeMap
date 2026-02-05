@@ -18,6 +18,8 @@
                 <ComboBoxItem Content="Placeholder size" />
             </ComboBox>
             <Button Name="ToggleViewBtn" Content="Show File List" Margin="8,0,0,0" />
+            <ProgressBar Name="RenderProgress" Width="100" Height="16" Margin="8,0,0,0" 
+                         Minimum="0" Maximum="100" IsVisible="False" />
             <TextBlock Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center" />
         </StackPanel>
 

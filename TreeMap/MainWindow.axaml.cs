@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -291,99 +292,19 @@ public partial class MainWindow : Window
             // Add to MRU before scanning
             addToMru(path);
 
-            // Progress reporter will forward incremental directory updates to the UI
-            var progress = new Progress<string>(s =>
-            {
-                try { this.FindControl<TextBlock>("StatusText").Text = s; } catch { }
-            });
-
-            // Cancellation token support (not currently exposed in UI)
+            // Create unified progress window for both scanning and rendering
             var cts = new System.Threading.CancellationTokenSource();
 
             // Get the selected cloud handling mode
             var cloudHandling = getCloudHandling();
 
-            // Run the async scan off the UI thread - use new API that reports errors
-            _ = DiskScanner.ScanWithErrorsAsync(path, progress, cts.Token, cloudHandling).ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                    return;
-
-                var scanResult = t.Result;
-                var dict = scanResult.Data;
-                lastScanResult = scanResult; // Store full result for later browse creation
-                browse = null; // Reset so it gets recreated with new data
-
-                // marshal UI updates back to UI thread
-                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            // Run the combined scan + render operation
+            _ = RunScanAndRenderAsync(path, cloudHandling, cts, treeCanvas, treeCanvasHost, this,
+                result =>
                 {
-                    try
-                    {
-                        // Update status with scan summary including any errors
-                        var statusText = this.FindControl<TextBlock>("StatusText");
-                        var summary = $"Items: {dict.Count:n0}";
-                        if (scanResult.SkippedSymlinks > 0)
-                            summary += $", Symlinks: {scanResult.SkippedSymlinks}";
-                        if (scanResult.CloudFileCount > 0)
-                        {
-                            var cloudSizeStr = scanResult.CloudFileLogicalSize >= 1_000_000_000 
-                                ? $"{scanResult.CloudFileLogicalSize / 1_000_000_000.0:F1}GB" 
-                                : scanResult.CloudFileLogicalSize >= 1_000_000 
-                                    ? $"{scanResult.CloudFileLogicalSize / 1_000_000.0:F1}MB" 
-                                    : $"{scanResult.CloudFileLogicalSize / 1_000.0:F1}KB";
-                            summary += $", Cloud: {scanResult.CloudFileCount} ({cloudSizeStr})";
-                        }
-                        if (scanResult.HasErrors)
-                            summary += $", Errors: {scanResult.Errors.Count}";
-                        statusText.Text = summary;
-
-                        // Log errors to debug output
-                        if (scanResult.HasErrors)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Scan completed with {scanResult.Errors.Count} errors:");
-                            foreach (var err in scanResult.Errors.Take(10)) // Show first 10
-                            {
-                                System.Diagnostics.Debug.WriteLine($"  [{err.ExceptionType}] {err.Path}: {err.Message}");
-                            }
-                            if (scanResult.Errors.Count > 10)
-                                System.Diagnostics.Debug.WriteLine($"  ... and {scanResult.Errors.Count - 10} more errors");
-                        }
-
-                        // port basic treemap layout: place rectangles proportional to size
-                        treeCanvas.Children.Clear();
-                        if (dict.Count == 0)
-                            return;
-
-                        string rootKey = null;
-                        foreach (var k in dict.Keys)
-                        {
-                            if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
-                            {
-                                if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
-                            }
-                        }
-                        rootKey ??= path + TreeMapConstants.PathSep;
-                        long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
-                        if (total == 0)
-                        {
-                            foreach (var v in dict.Values) total += v.Size;
-                        }
-
-                        // Use the Border's bounds since Canvas doesn't stretch
-                        var availW = treeCanvasHost.Bounds.Width;
-                        var availH = treeCanvasHost.Bounds.Height;
-                        // If host has no bounds yet, fallback to window size estimate
-                        if (availW <= 0) availW = this.Bounds.Width - 360;
-                        if (availH <= 0) availH = this.Bounds.Height - 120;
-                        var rect = new Rect(0, 0, availW > 0 ? availW : 800, availH > 0 ? availH : 600);
-                        // Set canvas size to match the available area
-                        treeCanvas.Width = rect.Width;
-                        treeCanvas.Height = rect.Height;
-                        TreemapPort.MakeTreemap(dict, treeCanvas, rootKey, rect, total);
-                    }
-                    catch { }
-                }, Avalonia.Threading.DispatcherPriority.Background);
-            });
+                    lastScanResult = result;
+                    browse = null;
+                });
         };
 
         // Wire scan button to run the common runScan helper
@@ -453,5 +374,123 @@ public partial class MainWindow : Window
             ? settings.MruPaths[0] 
             : System.IO.Directory.GetCurrentDirectory();
         Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Runs disk scan and treemap rendering with a unified progress window.
+    /// Phase 1: Scanning directories (progress shows scan status)
+    /// Phase 2: Rendering treemap (progress shows render percentage)
+    /// </summary>
+    private async Task RunScanAndRenderAsync(
+        string path,
+        CloudFileHandling cloudHandling,
+        System.Threading.CancellationTokenSource cts,
+        Canvas treeCanvas,
+        Border treeCanvasHost,
+        Window parentWindow,
+        Action<ScanResult> onScanComplete)
+    {
+        using var progressWindow = new ProgressWindow("TreeMap - Scanning & Rendering", cts);
+        await progressWindow.ShowAsync();
+
+        var statusText = this.FindControl<TextBlock>("StatusText");
+        string summary = "";
+
+        try
+        {
+            // Phase 1: Disk Scanning
+            progressWindow.SetPhase("📁 Scanning Directories...");
+
+            var scanResult = await DiskScanner.ScanWithErrorsAsync(path, progressWindow, cts.Token, cloudHandling);
+
+            if (cts.IsCancellationRequested)
+            {
+                statusText.Text = "Scan cancelled";
+                return;
+            }
+
+            var dict = scanResult.Data;
+            onScanComplete(scanResult);
+
+            // Build summary
+            summary = $"Items: {dict.Count:n0}";
+            if (scanResult.SkippedSymlinks > 0)
+                summary += $", Symlinks: {scanResult.SkippedSymlinks}";
+            if (scanResult.CloudFileCount > 0)
+            {
+                var cloudSizeStr = scanResult.CloudFileLogicalSize >= 1_000_000_000 
+                    ? $"{scanResult.CloudFileLogicalSize / 1_000_000_000.0:F1}GB" 
+                    : scanResult.CloudFileLogicalSize >= 1_000_000 
+                        ? $"{scanResult.CloudFileLogicalSize / 1_000_000.0:F1}MB" 
+                        : $"{scanResult.CloudFileLogicalSize / 1_000.0:F1}KB";
+                summary += $", Cloud: {scanResult.CloudFileCount} ({cloudSizeStr})";
+            }
+            if (scanResult.HasErrors)
+                summary += $", Errors: {scanResult.Errors.Count}";
+
+            // Log errors to debug output
+            if (scanResult.HasErrors)
+            {
+                System.Diagnostics.Debug.WriteLine($"Scan completed with {scanResult.Errors.Count} errors:");
+                foreach (var err in scanResult.Errors.Take(10))
+                {
+                    System.Diagnostics.Debug.WriteLine($"  [{err.ExceptionType}] {err.Path}: {err.Message}");
+                }
+                if (scanResult.Errors.Count > 10)
+                    System.Diagnostics.Debug.WriteLine($"  ... and {scanResult.Errors.Count - 10} more errors");
+            }
+
+            if (dict.Count == 0)
+            {
+                statusText.Text = "No items found";
+                return;
+            }
+
+            // Phase 2: Rendering
+            progressWindow.SetPhase($"🎨 Rendering {dict.Count:n0} items...");
+            progressWindow.ReportProgress(0);
+
+            treeCanvas.Children.Clear();
+
+            // Find root key
+            string? rootKey = null;
+            foreach (var k in dict.Keys)
+            {
+                if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                {
+                    if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                }
+            }
+            rootKey ??= path + TreeMapConstants.PathSep;
+
+            long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
+            if (total == 0)
+            {
+                foreach (var v in dict.Values) total += v.Size;
+            }
+
+            // Calculate canvas bounds
+            var availW = treeCanvasHost.Bounds.Width;
+            var availH = treeCanvasHost.Bounds.Height;
+            if (availW <= 0) availW = parentWindow.Bounds.Width - 360;
+            if (availH <= 0) availH = parentWindow.Bounds.Height - 120;
+            var rect = new Rect(0, 0, availW > 0 ? availW : 800, availH > 0 ? availH : 600);
+            treeCanvas.Width = rect.Width;
+            treeCanvas.Height = rect.Height;
+
+            // Render with progress
+            await TreemapPort.MakeTreemapWithProgressAsync(dict, treeCanvas, rootKey, rect, total, true, cts, progressWindow);
+
+            statusText.Text = summary;
+        }
+        catch (OperationCanceledException)
+        {
+            statusText.Text = "Operation cancelled";
+        }
+        catch (Exception ex)
+        {
+            statusText.Text = $"Error: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"RunScanAndRenderAsync error: {ex}");
+        }
     }
 }
