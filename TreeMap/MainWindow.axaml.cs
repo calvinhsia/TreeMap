@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.VisualTree;
 
@@ -41,6 +42,11 @@ public partial class MainWindow : Window
         {
             pathCombo.Items.Add(mruPath);
         }
+        // Select the first item if available
+        if (pathCombo.Items.Count > 0)
+        {
+            pathCombo.SelectedIndex = 0;
+        }
 
         // Set cloud handling from saved setting
         if (cloudHandlingCombo != null && settings.CloudHandlingIndex >= 0 && settings.CloudHandlingIndex < 3)
@@ -72,19 +78,32 @@ public partial class MainWindow : Window
             }
         };
 
-        // Helper to add path to MRU and refresh combo
+        // Helper to add path to MRU and refresh combo (without triggering SelectionChanged)
+        bool isRefreshingCombo = false;
         System.Action<string> addToMru = (path) =>
         {
+            // Prevent reentrant calls during combo refresh
+            if (isRefreshingCombo)
+                return;
+
             settings.AddMruPath(path);
             settings.CloudHandlingIndex = cloudHandlingCombo?.SelectedIndex ?? 0;
             settings.Save();
 
-            // Refresh combo items
+            // Refresh combo items without triggering another scan
+            isRefreshingCombo = true;
+            pathCombo.SelectedIndex = -1;  // Reset selection before clearing to avoid index issues
             pathCombo.Items.Clear();
             foreach (var mruPath in settings.MruPaths)
             {
                 pathCombo.Items.Add(mruPath);
             }
+            // Select the first item (the one we just added)
+            if (pathCombo.Items.Count > 0)
+            {
+                pathCombo.SelectedIndex = 0;
+            }
+            isRefreshingCombo = false;
         };
 
         // BrowseControl created lazily when user requests it via button or context menu
@@ -151,6 +170,101 @@ public partial class MainWindow : Window
             toggleTreemapMenuItemInit.Click += (s, args) => toggleView();
         }
 
+        // Wire up swap orientation menu item
+        var swapOrientationMenuItem = this.FindControl<MenuItem>("SwapOrientationMenuItem");
+        if (swapOrientationMenuItem != null)
+        {
+            swapOrientationMenuItem.Click += (s, args) =>
+            {
+                if (TreemapPort.CurrentDict != null && TreemapPort.CurrentRootPath != null)
+                {
+                    treeCanvas.Children.Clear();
+                    var rootKey = TreemapPort.CurrentRootPath;
+                    long total = TreemapPort.CurrentDict.ContainsKey(rootKey) ? TreemapPort.CurrentDict[rootKey].Size : 0;
+                    // If total is still 0, sum up child sizes (same fallback as main scan)
+                    if (total == 0)
+                    {
+                        foreach (var v in TreemapPort.CurrentDict.Values)
+                            total += v.Size;
+                    }
+                    var rect = new Rect(0, 0, treeCanvas.Width, treeCanvas.Height);
+                    // Swap orientation
+                    TreemapPort.MakeTreemap(TreemapPort.CurrentDict, treeCanvas, rootKey, rect, total, !TreemapPort.CurrentHorizontal);
+                }
+            };
+        }
+
+        // Wire up open explorer menu item
+        var openExplorerMenuItem = this.FindControl<MenuItem>("OpenExplorerMenuItem");
+        if (openExplorerMenuItem != null)
+        {
+            openExplorerMenuItem.Click += (s, args) =>
+            {
+                var pathToOpen = TreemapPort.LastClickedPath ?? TreemapPort.CurrentRootPath;
+                if (!string.IsNullOrEmpty(pathToOpen))
+                {
+                    try
+                    {
+                        // Remove trailing separator and data suffix for explorer
+                        var cleanPath = pathToOpen.TrimEnd(TreeMapConstants.PathSep);
+                        if (cleanPath.EndsWith("*"))
+                            cleanPath = cleanPath.TrimEnd('*').TrimEnd(TreeMapConstants.PathSep);
+
+                        // Open folder in explorer
+                        var psi = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = cleanPath,
+                            UseShellExecute = true
+                        };
+                        System.Diagnostics.Process.Start(psi);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Failed to open explorer: {ex.Message}");
+                    }
+                }
+            };
+        }
+
+        // Wire up new window menu item
+        var newWindowMenuItem = this.FindControl<MenuItem>("NewWindowMenuItem");
+        if (newWindowMenuItem != null)
+        {
+            newWindowMenuItem.Click += (s, args) =>
+            {
+                var pathForNewWindow = TreemapPort.LastClickedPath ?? TreemapPort.CurrentRootPath;
+                if (!string.IsNullOrEmpty(pathForNewWindow))
+                {
+                    // Clean the path
+                    var cleanPath = pathForNewWindow.TrimEnd(TreeMapConstants.PathSep);
+                    if (cleanPath.EndsWith("*"))
+                        cleanPath = cleanPath.TrimEnd('*').TrimEnd(TreeMapConstants.PathSep);
+
+                    // Create and show a new window
+                    var newWindow = new MainWindow();
+                    newWindow.Show();
+
+                    // The new window will auto-scan its initial path, but we want it to scan cleanPath
+                    // We can set this via a property or by posting to the dispatcher after it opens
+                    newWindow.Opened += (ws, we) =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            var newPathCombo = newWindow.FindControl<ComboBox>("PathCombo");
+                            var newTextBox = newPathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
+                            if (newTextBox != null)
+                            {
+                                newTextBox.Text = cleanPath;
+                            }
+                            // Trigger scan by clicking the scan button
+                            var newScanBtn = newWindow.FindControl<Button>("ScanBtn");
+                            newScanBtn?.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                        }, Avalonia.Threading.DispatcherPriority.Background);
+                    };
+                }
+            };
+        }
+
         // Use the Border (TreeCanvasHost) to detect valid bounds since Canvas doesn't stretch
         bool initialScanDone = false;
         System.Action<string>? runScan = null;
@@ -162,7 +276,7 @@ public partial class MainWindow : Window
                 {
                     initialScanDone = true;
                     var initialPath = settings.MruPaths.Count > 0 
-                        ? settings.MruPaths[0] 
+                        ? settings.MruPaths[0]
                         : System.IO.Directory.GetCurrentDirectory();
                     setPath(initialPath);
                     Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initialPath), Avalonia.Threading.DispatcherPriority.Background);
@@ -277,6 +391,23 @@ public partial class MainWindow : Window
         {
             var path = getPath();
             runScan(path);
+        };
+
+        // Wire up path combo selection changed - scan when user selects from MRU dropdown
+        pathCombo.SelectionChanged += (s, args) =>
+        {
+            // Skip if we're just refreshing the combo programmatically
+            if (isRefreshingCombo)
+                return;
+
+            if (args.AddedItems.Count > 0 && args.AddedItems[0] is string selectedPath)
+            {
+                // Only scan if selection actually changed (not just programmatic refresh)
+                if (!string.IsNullOrEmpty(selectedPath) && runScan != null)
+                {
+                    runScan(selectedPath);
+                }
+            }
         };
 
         // Folder picker using Avalonia's OpenFolderDialog

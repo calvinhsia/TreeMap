@@ -37,6 +37,10 @@
                     <Canvas.ContextMenu>
                         <ContextMenu>
                             <MenuItem Name="ToggleBrowseMenuItem" Header="Show File List" />
+                            <Separator />
+                            <MenuItem Name="SwapOrientationMenuItem" Header="Swap Horizontal/Vertical" />
+                            <MenuItem Name="OpenExplorerMenuItem" Header="Open in Explorer" />
+                            <MenuItem Name="NewWindowMenuItem" Header="New Window at Selection" />
                         </ContextMenu>
                     </Canvas.ContextMenu>
                 </Canvas>

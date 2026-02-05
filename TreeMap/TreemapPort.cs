@@ -8,9 +8,23 @@ namespace TreeMap;
 
 public static class TreemapPort
 {
+    // Store current state for context menu operations
+    public static ConcurrentDictionary<string, MapDataItem>? CurrentDict { get; private set; }
+    public static string? CurrentRootPath { get; private set; }
+    public static bool CurrentHorizontal { get; private set; } = true;
+    public static string? LastClickedPath { get; set; } // Set by rectangle click
+
     // Recursive slice-and-dice treemap. Alternates horizontal/vertical splits.
     public static void MakeTreemap(ConcurrentDictionary<string, MapDataItem> dict, Canvas canvas, string parentPath, Rect parentRect, long parentTotalSize, bool horizontal = true)
     {
+        // Store state for context menu operations - only on root call (when canvas is empty)
+        if (canvas.Children.Count == 0)
+        {
+            CurrentDict = dict;
+            CurrentRootPath = parentPath;
+            CurrentHorizontal = horizontal;
+        }
+
         var parentDepth = dict.ContainsKey(parentPath) ? dict[parentPath].Depth : parentPath.Count(c => c == TreeMapConstants.PathSep);
         var childKeys = dict.Keys.Where(k => k.StartsWith(parentPath) && dict[k].Depth == parentDepth + 1).OrderByDescending(k => dict[k].Size).ToList();
         double x = parentRect.X;
@@ -69,6 +83,9 @@ public static class TreemapPort
             ToolTip.SetTip(rect, $"{key}\n{sizeStr}{cloudInfo}");
             rect.PointerPressed += (s, e) =>
             {
+                // Track last clicked path for context menu operations
+                LastClickedPath = key;
+
                 // Only drill down on LEFT click, not right click (which opens context menu)
                 if (e.GetCurrentPoint(rect).Properties.IsLeftButtonPressed)
                 {
