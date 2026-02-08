@@ -15,7 +15,9 @@ namespace TreeMap
     public class MapDataItem
     {
         public int Depth; // # of separators in path
-        public long Size; // bytes
+        public long Size; // bytes (calculated based on CloudFileHandling)
+        public long LocalSize; // bytes from local (non-cloud) files only
+        public long CloudLogicalSize; // logical size of cloud files (as if downloaded)
         public int NumFiles;
         public int Index;
         public Rect rect;

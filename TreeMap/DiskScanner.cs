@@ -57,6 +57,32 @@ namespace TreeMap
         // Estimated size of a cloud placeholder file on disk
         private const long PlaceholderSizeEstimate = 1024; // ~1KB
 
+        /// <summary>
+        /// Calculates the display size based on cloud file handling option.
+        /// </summary>
+        private static long CalculateSize(long localSize, long cloudLogicalSize, int cloudFileCount, CloudFileHandling cloudHandling)
+        {
+            return cloudHandling switch
+            {
+                CloudFileHandling.ExcludeFromSize => localSize,
+                CloudFileHandling.IncludePlaceholderSize => localSize + (cloudFileCount > 0 ? cloudFileCount * PlaceholderSizeEstimate : (cloudLogicalSize > 0 ? PlaceholderSizeEstimate : 0)),
+                _ => localSize + cloudLogicalSize // IncludeLogicalSize (default)
+            };
+        }
+
+        /// <summary>
+        /// Recalculates all sizes in a scan result based on a new cloud handling option.
+        /// This avoids needing to rescan the disk when the user changes the cloud handling preference.
+        /// </summary>
+        public static void RecalculateSizes(ScanResult result, CloudFileHandling cloudHandling)
+        {
+            foreach (var kvp in result.Data)
+            {
+                var item = kvp.Value;
+                item.Size = CalculateSize(item.LocalSize, item.CloudLogicalSize, item.CloudFileCount, cloudHandling);
+            }
+        }
+
         public static ConcurrentDictionary<string, MapDataItem> Scan(string rootPath)
         {
             // backward-compatible synchronous API; run the async scan and wait
@@ -149,12 +175,13 @@ namespace TreeMap
             });
         }
 
-        private static async Task<long> ScanInternal(string cPath, ScanResult result, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
+        private static async Task<(long localSize, long cloudLogicalSize)> ScanInternal(string cPath, ScanResult result, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
         {
             var dict = result.Data;
-            long totalSize = 0;
-            long curdirFileSize = 0;
-            long curdirFolderSize = 0;
+            long curdirLocalFileSize = 0;
+            long curdirCloudLogicalSize = 0;
+            long childLocalSize = 0;
+            long childCloudLogicalSize = 0;
 
             // Check cancellation and report progress
             cancellationToken.ThrowIfCancellationRequested();
@@ -167,20 +194,20 @@ namespace TreeMap
                 if (!dirInfo.Exists)
                 {
                     LogError(result, cPath, new DirectoryNotFoundException($"Directory not found: {cPath}"));
-                    return 0;
+                    return (0, 0);
                 }
             }
             catch (Exception ex)
             {
                 LogError(result, cPath, ex);
-                return 0;
+                return (0, 0);
             }
 
             // Skip reparse points (symlinks, junctions) to avoid infinite loops
             if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 result.SkippedSymlinks++;
-                return 0;
+                return (0, 0);
             }
 
             var nDepth = cPath.Where(c => c == TreeMapConstants.PathSep).Count();
@@ -192,17 +219,17 @@ namespace TreeMap
             catch (UnauthorizedAccessException ex) 
             { 
                 LogError(result, cPath, ex);
-                return 0; 
+                return (0, 0); 
             }
             catch (DirectoryNotFoundException ex) 
             { 
                 LogError(result, cPath, ex);
-                return 0;
+                return (0, 0);
             }
             catch (IOException ex) 
             { 
                 LogError(result, cPath, ex);
-                return 0; 
+                return (0, 0); 
             }
 
             if (curDirFiles.Length > 0)
@@ -224,27 +251,13 @@ namespace TreeMap
                             cloudFileCountInDir++;
                             hasCloudFiles = true;
 
-                            // Apply cloud file handling option
-                            switch (cloudHandling)
-                            {
-                                case CloudFileHandling.ExcludeFromSize:
-                                    // Don't add to size - cloud files use minimal actual space
-                                    break;
-                                case CloudFileHandling.IncludePlaceholderSize:
-                                    // Add estimated placeholder size (~1KB)
-                                    curdirFileSize += PlaceholderSizeEstimate;
-                                    break;
-                                case CloudFileHandling.IncludeLogicalSize:
-                                default:
-                                    // Add logical size (as if downloaded)
-                                    curdirFileSize += logicalSize;
-                                    break;
-                            }
+                            // Store cloud logical size separately for recalculation
+                            curdirCloudLogicalSize += logicalSize;
                         }
                         else
                         {
                             // Local file - add actual size
-                            curdirFileSize += logicalSize;
+                            curdirLocalFileSize += logicalSize;
                         }
                     }
                     catch (PathTooLongException ex) 
@@ -263,7 +276,9 @@ namespace TreeMap
                 dict[cPath + TreeMapConstants.DataSuffix] = new MapDataItem()
                 {
                     Depth = nDepth + 1,
-                    Size = curdirFileSize,
+                    Size = CalculateSize(curdirLocalFileSize, curdirCloudLogicalSize, cloudFileCountInDir, cloudHandling),
+                    LocalSize = curdirLocalFileSize,
+                    CloudLogicalSize = curdirCloudLogicalSize,
                     NumFiles = curDirFiles.Length,
                     Index = dict.Count,
                     IsCloudOnly = hasCloudFiles,
@@ -298,13 +313,24 @@ namespace TreeMap
                     var childPath = Path.Combine(cPath, Path.GetFileName(dir));
                     if (!childPath.EndsWith(TreeMapConstants.PathSep.ToString()))
                         childPath += TreeMapConstants.PathSep;
-                    curdirFolderSize += await ScanInternal(childPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
+                    var (childLocal, childCloud) = await ScanInternal(childPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
+                    childLocalSize += childLocal;
+                    childCloudLogicalSize += childCloud;
                 }
             }
-            totalSize += curdirFileSize + curdirFolderSize;
-            dict[cPath] = new MapDataItem() { Depth = nDepth, Size = curdirFileSize + curdirFolderSize, Index = dict.Count };
 
-            return totalSize;
+            var totalLocalSize = curdirLocalFileSize + childLocalSize;
+            var totalCloudLogicalSize = curdirCloudLogicalSize + childCloudLogicalSize;
+            dict[cPath] = new MapDataItem() 
+            { 
+                Depth = nDepth, 
+                Size = CalculateSize(totalLocalSize, totalCloudLogicalSize, 0, cloudHandling),
+                LocalSize = totalLocalSize,
+                CloudLogicalSize = totalCloudLogicalSize,
+                Index = dict.Count 
+            };
+
+            return (totalLocalSize, totalCloudLogicalSize);
         }
     }
 }

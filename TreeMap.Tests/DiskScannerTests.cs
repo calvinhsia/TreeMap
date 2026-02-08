@@ -37,6 +37,11 @@ public class DiskScannerTests
             Assert.Equal(11, rootItem.Size); // 5 + 6
             Assert.Equal(6, subFilesItem.Size);
             Assert.Equal(6, subItem.Size);
+
+            // Verify file counts are tracked
+            var rootFilesItem = dict[rootKey + TreeMap.TreeMapConstants.DataSuffix];
+            Assert.Equal(1, rootFilesItem.NumFiles); // a.txt
+            Assert.Equal(1, subFilesItem.NumFiles);  // b.txt
         }
         finally
         {

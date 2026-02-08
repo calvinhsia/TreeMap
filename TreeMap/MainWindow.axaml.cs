@@ -125,6 +125,33 @@ public partial class MainWindow : Window
             };
         };
 
+        // Helper to redraw the treemap using existing scan data (without rescanning)
+        System.Action? redrawTreemap = null;
+
+        // Wire up cloud handling combo - recalculate sizes without rescanning
+        if (cloudHandlingCombo != null)
+        {
+            cloudHandlingCombo.SelectionChanged += (s, args) =>
+            {
+                if (lastScanResult != null && lastScanResult.Data.Count > 0)
+                {
+                    // Recalculate sizes based on new cloud handling option (no rescan needed!)
+                    var cloudHandling = getCloudHandling();
+                    DiskScanner.RecalculateSizes(lastScanResult, cloudHandling);
+
+                    // Save the preference
+                    settings.CloudHandlingIndex = cloudHandlingCombo.SelectedIndex;
+                    settings.Save();
+
+                    // Invalidate cached browse control since sizes changed
+                    browse = null;
+
+                    // Redraw the treemap with updated sizes
+                    redrawTreemap?.Invoke();
+                }
+            };
+        }
+
         // Helper to toggle between treemap and file list views
         System.Action toggleView = () =>
         {
@@ -137,10 +164,11 @@ public partial class MainWindow : Window
                 foreach (var kv in lastScanResult.Data)
                     items.Add(new { 
                         Path = kv.Key, 
-                        Size = kv.Value.Size, 
+                        Size = kv.Value.Size,
+                        Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
                         CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : ""
                     });
-                browse = new BrowseControl(items, new[] { 500, 100, 70 }, true);
+                browse = new BrowseControl(items, new[] { 500, 100, 60, 70 }, true);
                 left.Content = browse;
             }
 
@@ -319,6 +347,59 @@ public partial class MainWindow : Window
                     lastScanResult = result;
                     browse = null;
                 });
+        };
+
+        // Define redrawTreemap - redraws treemap without rescanning (for cloud handling changes)
+        redrawTreemap = () =>
+        {
+            if (lastScanResult == null || lastScanResult.Data.Count == 0)
+                return;
+
+            var dict = lastScanResult.Data;
+            treeCanvas.Children.Clear();
+
+            // Find root key
+            string? rootKey = null;
+            foreach (var k in dict.Keys)
+            {
+                if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                {
+                    if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                }
+            }
+            if (rootKey == null)
+                return;
+
+            long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
+            if (total == 0)
+            {
+                foreach (var v in dict.Values) total += v.Size;
+            }
+
+            var availW = treeCanvasHost.Bounds.Width;
+            var availH = treeCanvasHost.Bounds.Height;
+            if (availW <= 0) availW = this.Bounds.Width - 360;
+            if (availH <= 0) availH = this.Bounds.Height - 120;
+            var rect = new Rect(0, 0, availW > 0 ? availW : 800, availH > 0 ? availH : 600);
+            treeCanvas.Width = rect.Width;
+            treeCanvas.Height = rect.Height;
+
+            // Redraw synchronously (data is already in memory)
+            TreemapPort.MakeTreemap(dict, treeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
+
+            // Update status text with summary
+            var statusText = this.FindControl<TextBlock>("StatusText");
+            if (statusText != null)
+            {
+                var cloudHandling = getCloudHandling();
+                var modeStr = cloudHandling switch
+                {
+                    CloudFileHandling.ExcludeFromSize => "Cloud: Excluded",
+                    CloudFileHandling.IncludePlaceholderSize => "Cloud: Placeholder",
+                    _ => "Cloud: Logical Size"
+                };
+                statusText.Text = $"Items: {dict.Count:n0}, {modeStr}";
+            }
         };
 
         // Wire scan button to run the common runScan helper
