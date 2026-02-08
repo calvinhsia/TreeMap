@@ -99,11 +99,13 @@ public partial class MainWindow : Window
             {
                 pathCombo.Items.Add(mruPath);
             }
-            // Select the first item (the one we just added)
+            // Select the first item (the one we just added/moved to front)
             if (pathCombo.Items.Count > 0)
             {
                 pathCombo.SelectedIndex = 0;
             }
+            // Also update the text box directly to ensure it shows the path
+            setPath(path);
             isRefreshingCombo = false;
         };
 
@@ -292,6 +294,18 @@ public partial class MainWindow : Window
             // Add to MRU before scanning
             addToMru(path);
 
+            // Switch to treemap view if currently showing file list (file list becomes stale with new scan)
+            if (left.IsVisible)
+            {
+                left.IsVisible = false;
+                treeCanvasHost.IsVisible = true;
+                var newText = "Show File List";
+                if (toggleViewBtn != null) toggleViewBtn.Content = newText;
+                if (toggleBrowseMenuItem != null) toggleBrowseMenuItem.Header = newText;
+                var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
+                if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
+            }
+
             // Create unified progress window for both scanning and rendering
             var cts = new System.Threading.CancellationTokenSource();
 
@@ -327,6 +341,20 @@ public partial class MainWindow : Window
                 if (!string.IsNullOrEmpty(selectedPath) && runScan != null)
                 {
                     runScan(selectedPath);
+                }
+            }
+        };
+
+        // Allow user to press Enter in the combo box to scan (for manually typed paths)
+        pathCombo.KeyDown += (s, e) =>
+        {
+            if (e.Key == Avalonia.Input.Key.Enter)
+            {
+                var path = getPath();
+                if (!string.IsNullOrEmpty(path) && runScan != null)
+                {
+                    runScan(path);
+                    e.Handled = true;
                 }
             }
         };
