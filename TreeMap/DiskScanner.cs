@@ -175,14 +175,15 @@ namespace TreeMap
             });
         }
 
-        private static async Task<(long localSize, long cloudLogicalSize)> ScanInternal(string cPath, ScanResult result, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
+        private static async Task<(long localSize, long cloudLogicalSize, int fileCount)> ScanInternal(string cPath, ScanResult result, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
         {
             var dict = result.Data;
             long curdirLocalFileSize = 0;
             long curdirCloudLogicalSize = 0;
             long childLocalSize = 0;
             long childCloudLogicalSize = 0;
-
+            int curdirFileCount = 0;
+            int childFileCount = 0;
             // Check cancellation and report progress
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(cPath);
@@ -194,20 +195,20 @@ namespace TreeMap
                 if (!dirInfo.Exists)
                 {
                     LogError(result, cPath, new DirectoryNotFoundException($"Directory not found: {cPath}"));
-                    return (0, 0);
+                    return (0, 0, 0);
                 }
             }
             catch (Exception ex)
             {
                 LogError(result, cPath, ex);
-                return (0, 0);
+                return (0, 0, 0);
             }
 
             // Skip reparse points (symlinks, junctions) to avoid infinite loops
             if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 result.SkippedSymlinks++;
-                return (0, 0);
+                return (0, 0, 0);
             }
 
             var nDepth = cPath.Where(c => c == TreeMapConstants.PathSep).Count();
@@ -219,17 +220,17 @@ namespace TreeMap
             catch (UnauthorizedAccessException ex) 
             { 
                 LogError(result, cPath, ex);
-                return (0, 0); 
+                return (0, 0, 0); 
             }
             catch (DirectoryNotFoundException ex) 
             { 
                 LogError(result, cPath, ex);
-                return (0, 0);
+                return (0, 0, 0);
             }
             catch (IOException ex) 
             { 
                 LogError(result, cPath, ex);
-                return (0, 0); 
+                return (0, 0, 0); 
             }
 
             if (curDirFiles.Length > 0)
@@ -284,6 +285,7 @@ namespace TreeMap
                     IsCloudOnly = hasCloudFiles,
                     CloudFileCount = cloudFileCountInDir
                 };
+                curdirFileCount = curDirFiles.Length;
             }
 
             string[] curDirFolders = Array.Empty<string>();
@@ -313,24 +315,27 @@ namespace TreeMap
                     var childPath = Path.Combine(cPath, Path.GetFileName(dir));
                     if (!childPath.EndsWith(TreeMapConstants.PathSep.ToString()))
                         childPath += TreeMapConstants.PathSep;
-                    var (childLocal, childCloud) = await ScanInternal(childPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
+                    var (childLocal, childCloud, childFiles) = await ScanInternal(childPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
                     childLocalSize += childLocal;
                     childCloudLogicalSize += childCloud;
+                    childFileCount += childFiles;
                 }
             }
 
             var totalLocalSize = curdirLocalFileSize + childLocalSize;
             var totalCloudLogicalSize = curdirCloudLogicalSize + childCloudLogicalSize;
+            var totalFileCount = curdirFileCount + childFileCount;
             dict[cPath] = new MapDataItem() 
             { 
                 Depth = nDepth, 
                 Size = CalculateSize(totalLocalSize, totalCloudLogicalSize, 0, cloudHandling),
                 LocalSize = totalLocalSize,
                 CloudLogicalSize = totalCloudLogicalSize,
+                NumFiles = totalFileCount,
                 Index = dict.Count 
             };
 
-            return (totalLocalSize, totalCloudLogicalSize);
+            return (totalLocalSize, totalCloudLogicalSize, totalFileCount);
         }
     }
 }
