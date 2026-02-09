@@ -1,7 +1,8 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="TreeMap.MainWindow"
-        Title="TreeMap (Avalonia)"
+        Title="TreeMap (Avalonia)" Icon="avares://TreeMap/Assets/treemap-icon.png"
+        
         Width="1000" Height="700"
         WindowState="Maximized"
         Background="#FFFFFFFF">

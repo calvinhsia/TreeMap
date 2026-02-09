@@ -28,6 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AvaloniaResource Include="Assets\treemap-icon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Rely on SDK implicit items for Compile, Page, ApplicationDefinition and EmbeddedResource -->
   </ItemGroup>
 
