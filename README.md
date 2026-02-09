@@ -18,8 +18,10 @@ A disk space visualization tool that displays directory sizes as a treemap, help
 
 ## Requirements
 
-- Windows 10/11
 - .NET 10 Runtime
+- **Windows 10/11**, **macOS**, or **Linux**
+
+> **Note:** Cloud file detection (OneDrive placeholders) is Windows-specific. On macOS/Linux, all files are treated as local files.
 
 ## Building
 
