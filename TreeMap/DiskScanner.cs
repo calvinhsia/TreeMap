@@ -110,7 +110,7 @@ namespace TreeMap
 
             return Task.Run(async () =>
             {
-                await ScanInternal(rootPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
+                await ScanInternal(rootPath, rootPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
                 return result;
             }, cancellationToken);
         }
@@ -175,7 +175,7 @@ namespace TreeMap
             });
         }
 
-        private static async Task<(long localSize, long cloudLogicalSize, int fileCount)> ScanInternal(string cPath, ScanResult result, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
+        private static async Task<(long localSize, long cloudLogicalSize, int fileCount)> ScanInternal(string cPath, string rootPath, ScanResult result, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
         {
             var dict = result.Data;
             long curdirLocalFileSize = 0;
@@ -186,7 +186,7 @@ namespace TreeMap
             int childFileCount = 0;
             // Check cancellation and report progress
             cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(cPath);
+            var relativePath = cPath.StartsWith(rootPath) ? cPath.Substring(rootPath.Length) : cPath; if (string.IsNullOrEmpty(relativePath)) relativePath = "."; progress?.Report(relativePath);
 
             DirectoryInfo dirInfo;
             try
@@ -315,7 +315,7 @@ namespace TreeMap
                     var childPath = Path.Combine(cPath, Path.GetFileName(dir));
                     if (!childPath.EndsWith(TreeMapConstants.PathSep.ToString()))
                         childPath += TreeMapConstants.PathSep;
-                    var (childLocal, childCloud, childFiles) = await ScanInternal(childPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
+                    var (childLocal, childCloud, childFiles) = await ScanInternal(childPath, rootPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
                     childLocalSize += childLocal;
                     childCloudLogicalSize += childCloud;
                     childFileCount += childFiles;

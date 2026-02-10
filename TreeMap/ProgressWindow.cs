@@ -68,7 +68,7 @@ public class ProgressWindow : IDisposable, IProgress<string>
         _window = new Window
         {
             Title = _title,
-            Width = 450,
+            Width = 700,
             Height = _cts != null ? 160 : 130,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
             CanResize = false,
@@ -105,10 +105,9 @@ public class ProgressWindow : IDisposable, IProgress<string>
         _statusText = new TextBlock
         {
             Text = "",
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Margin = new Thickness(0, 8, 0, 0),
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 400
+            TextTrimming = TextTrimming.CharacterEllipsis
         };
         Grid.SetRow(_statusText, 2);
 

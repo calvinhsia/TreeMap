@@ -11,6 +11,81 @@ using System.Threading.Tasks;
 
 namespace TreeMap;
 
+/// <summary>
+/// Pre-computed parent→children lookup for O(1) child access instead of O(n) scans.
+/// Build once, use many times during treemap rendering.
+/// </summary>
+internal class TreemapLookup
+{
+    private readonly Dictionary<string, List<string>> _childrenByParent;
+    private readonly ConcurrentDictionary<string, MapDataItem> _dict;
+
+    public TreemapLookup(ConcurrentDictionary<string, MapDataItem> dict)
+    {
+        _dict = dict;
+        _childrenByParent = new Dictionary<string, List<string>>();
+
+        // Build parent→children lookup in a single pass: O(n)
+        foreach (var key in dict.Keys)
+        {
+            var depth = dict[key].Depth;
+            // Find parent by looking for the path one level up
+            var parentPath = GetParentPath(key, depth);
+            if (parentPath != null)
+            {
+                if (!_childrenByParent.TryGetValue(parentPath, out var children))
+                {
+                    children = new List<string>();
+                    _childrenByParent[parentPath] = children;
+                }
+                children.Add(key);
+            }
+        }
+
+        // Sort children by size descending (do this once, not on every access)
+        foreach (var kvp in _childrenByParent)
+        {
+            kvp.Value.Sort((a, b) => _dict[b].Size.CompareTo(_dict[a].Size));
+        }
+    }
+
+    private static string? GetParentPath(string path, int depth)
+    {
+        // For a path like "C:\foo\bar\" at depth 3, parent is "C:\foo\" at depth 2
+        // For data suffix paths like "C:\foo\*", parent is "C:\foo\"
+        if (path.EndsWith("*"))
+        {
+            // Data suffix - parent is the directory
+            return path.Substring(0, path.Length - 1);
+        }
+
+        // Find the second-to-last separator
+        var trimmed = path.TrimEnd(TreeMapConstants.PathSep);
+        var lastSep = trimmed.LastIndexOf(TreeMapConstants.PathSep);
+        if (lastSep > 0)
+        {
+            return trimmed.Substring(0, lastSep + 1);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Get children of a path, already sorted by size descending. O(1) lookup.
+    /// </summary>
+    public List<string> GetChildren(string parentPath)
+    {
+        return _childrenByParent.TryGetValue(parentPath, out var children) ? children : new List<string>();
+    }
+
+    /// <summary>
+    /// Check if a path has children. O(1) lookup.
+    /// </summary>
+    public bool HasChildren(string path)
+    {
+        return _childrenByParent.ContainsKey(path);
+    }
+}
+
 public static class TreemapPort
 {
     // Store current state for context menu operations
@@ -20,221 +95,134 @@ public static class TreemapPort
     public static string? LastClickedPath { get; set; } // Set by rectangle click
 
     /// <summary>
-    /// Async treemap rendering with progress reporting to a ProgressWindow.
-    /// Use this when you want to share a progress window between scanning and rendering.
+    /// Async treemap rendering with progress reporting.
     /// </summary>
-    public static async Task MakeTreemapWithProgressAsync(
+    /// <param name="dict">The scanned data dictionary</param>
+    /// <param name="canvas">Canvas to render to</param>
+    /// <param name="parentPath">Root path to render from</param>
+    /// <param name="parentRect">Rectangle bounds for rendering</param>
+    /// <param name="parentTotalSize">Total size of parent</param>
+    /// <param name="horizontal">Start with horizontal split</param>
+    /// <param name="cts">Cancellation token source (optional, created if null)</param>
+    /// <param name="progressWindow">Progress window to use (optional, created if null)</param>
+    public static async Task MakeTreemapAsync(
         ConcurrentDictionary<string, MapDataItem> dict,
         Canvas canvas,
         string parentPath,
         Rect parentRect,
         long parentTotalSize,
-        bool horizontal,
-        CancellationTokenSource cts,
-        ProgressWindow progressWindow)
+        bool horizontal = true,
+        CancellationTokenSource? cts = null,
+        ProgressWindow? progressWindow = null)
     {
         // Store state for context menu operations
         CurrentDict = dict;
         CurrentRootPath = parentPath;
         CurrentHorizontal = horizontal;
 
-        // Collect all visual elements (must be on UI thread since we create Avalonia objects)
-        var elements = new List<(Control element, double left, double top)>();
-        int totalItems = dict.Count;
-        int processedItems = 0;
+        // Create CTS if not provided
+        cts ??= new CancellationTokenSource();
 
-        progressWindow.Report("Collecting visual elements...");
-
-        // Collection must happen on UI thread (Avalonia objects require it)
-        CollectTreemapElements(dict, canvas, parentPath, parentRect, parentTotalSize, horizontal, elements, ref processedItems, totalItems, null);
-
-        if (cts.IsCancellationRequested)
+        // Create progress window if not provided
+        bool ownsProgressWindow = progressWindow == null;
+        if (ownsProgressWindow)
         {
-            progressWindow.Report("Cancelled");
-            return;
+            progressWindow = new ProgressWindow($"Rendering {dict.Count:n0} items...", cts);
+            await progressWindow.ShowAsync();
+            progressWindow.SetPhase("🎨 Rendering Treemap");
         }
 
-        progressWindow.ReportProgress(0);
-        progressWindow.Report($"Adding {elements.Count:n0} elements to canvas...");
-
-        // Add elements to canvas in batches
-        const int batchSize = 500;
-        canvas.Children.Clear();
-
-        for (int i = 0; i < elements.Count; i += batchSize)
+        try
         {
+            // Build lookup once - O(n) instead of O(n²) repeated scans
+            progressWindow!.Report("Building index...");
+            var lookup = new TreemapLookup(dict);
+
+            // Collect all visual elements
+            var elements = new List<(Control element, double left, double top)>();
+            int totalItems = dict.Count;
+
+            progressWindow.Report("Collecting visual elements...");
+
+            await CollectTreemapElementsAsync(dict, lookup, canvas, parentPath, parentRect, parentTotalSize, horizontal, elements,
+                0, totalItems, progressWindow, cts);
+
             if (cts.IsCancellationRequested)
             {
                 progressWindow.Report("Cancelled");
-                break;
+                return;
             }
 
-            var batch = elements.Skip(i).Take(batchSize).ToList();
+            progressWindow.ReportProgress(0);
+            progressWindow.Report($"Adding {elements.Count:n0} elements to canvas...");
 
-            // Add batch on UI thread
-            foreach (var (element, left, top) in batch)
+            // Add elements to canvas in batches
+            const int batchSize = 500;
+            canvas.Children.Clear();
+
+            for (int i = 0; i < elements.Count; i += batchSize)
             {
-                Canvas.SetLeft(element, left);
-                Canvas.SetTop(element, top);
-                canvas.Children.Add(element);
+                if (cts.IsCancellationRequested)
+                {
+                    progressWindow.Report("Cancelled");
+                    break;
+                }
+
+                var batch = elements.Skip(i).Take(batchSize).ToList();
+
+                foreach (var (element, left, top) in batch)
+                {
+                    Canvas.SetLeft(element, left);
+                    Canvas.SetTop(element, top);
+                    canvas.Children.Add(element);
+                }
+
+                int pct = (int)((i + batchSize) * 100.0 / elements.Count);
+                progressWindow.Report(Math.Min(pct, 100), $"Rendered {Math.Min(i + batchSize, elements.Count):n0} / {elements.Count:n0}");
+
+                await Task.Delay(1);
             }
 
-            // Report progress
-            int pct = (int)((i + batchSize) * 100.0 / elements.Count);
-            progressWindow.ReportProgress(Math.Min(pct, 100));
-            progressWindow.Report($"Rendered {Math.Min(i + batchSize, elements.Count):n0} / {elements.Count:n0}");
-
-            // Yield to allow UI updates
-            await Task.Delay(1);
+            if (!cts.IsCancellationRequested)
+            {
+                progressWindow.ReportProgress(100);
+                if (ownsProgressWindow)
+                    await Task.Delay(100); // Brief pause to show 100%
+            }
         }
-
-        progressWindow.ReportProgress(100);
+        finally
+        {
+            if (ownsProgressWindow)
+                progressWindow?.Dispose();
+        }
     }
 
     /// <summary>
-    /// Async version that creates its own progress window.
-    /// Supports cancellation via the progress window's Cancel button.
+    /// Async version of CollectTreemapElements that yields periodically for UI updates and reports progress.
+    /// Uses pre-built lookup for O(1) child access instead of O(n) scans.
     /// </summary>
-    public static async Task MakeTreemapWithProgressWindowAsync(
+    private static async Task CollectTreemapElementsAsync(
         ConcurrentDictionary<string, MapDataItem> dict,
-        Canvas canvas,
-        string parentPath,
-        Rect parentRect,
-        long parentTotalSize,
-        bool horizontal = true,
-        CancellationTokenSource? cts = null)
-    {
-        // Store state for context menu operations
-        CurrentDict = dict;
-        CurrentRootPath = parentPath;
-        CurrentHorizontal = horizontal;
-
-        // Create CTS if not provided (for cancel button)
-        cts ??= new CancellationTokenSource();
-
-        // Show progress window
-        using var progressWindow = new ProgressWindow($"Rendering {dict.Count:n0} items...", cts);
-        await progressWindow.ShowAsync();
-        progressWindow.SetPhase("🎨 Rendering Treemap");
-
-        // Collect all visual elements (must be on UI thread since we create Avalonia objects)
-        var elements = new List<(Control element, double left, double top)>();
-        int totalItems = dict.Count;
-        int processedItems = 0;
-
-        progressWindow.Report("Collecting elements...");
-
-        // Collection must happen on UI thread (Avalonia objects require it)
-        CollectTreemapElements(dict, canvas, parentPath, parentRect, parentTotalSize, horizontal, elements, ref processedItems, totalItems, null);
-
-        if (cts.IsCancellationRequested)
-        {
-            progressWindow.Report("Cancelled");
-            return;
-        }
-
-        progressWindow.ReportProgress(0);
-
-        // Add elements to canvas in batches
-        const int batchSize = 500;
-        canvas.Children.Clear();
-
-        for (int i = 0; i < elements.Count; i += batchSize)
-        {
-            if (cts.IsCancellationRequested)
-            {
-                progressWindow.Report("Cancelled");
-                break;
-            }
-
-            var batch = elements.Skip(i).Take(batchSize).ToList();
-
-            // Add batch on UI thread
-            foreach (var (element, left, top) in batch)
-            {
-                Canvas.SetLeft(element, left);
-                Canvas.SetTop(element, top);
-                canvas.Children.Add(element);
-            }
-
-            // Report progress
-            int pct = (int)((i + batchSize) * 100.0 / elements.Count);
-            progressWindow.Report(pct, $"Rendered {Math.Min(i + batchSize, elements.Count):n0} / {elements.Count:n0}");
-
-            // Yield to allow progress window and main UI to update
-            await Task.Delay(1);
-        }
-
-        if (!cts.IsCancellationRequested)
-        {
-            progressWindow.ReportProgress(100);
-            await Task.Delay(100); // Brief pause to show 100%
-        }
-    }
-
-    // Async version that yields to UI thread periodically for responsiveness
-    public static async Task MakeTreemapAsync(
-        ConcurrentDictionary<string, MapDataItem> dict, 
-        Canvas canvas, 
-        string parentPath, 
-        Rect parentRect, 
-        long parentTotalSize, 
-        bool horizontal = true,
-        IProgress<int>? progress = null)
-    {
-        // Store state for context menu operations
-        CurrentDict = dict;
-        CurrentRootPath = parentPath;
-        CurrentHorizontal = horizontal;
-
-        // Collect all visual elements first
-        var elements = new List<(Control element, double left, double top)>();
-        int totalItems = dict.Count;
-        int processedItems = 0;
-
-        CollectTreemapElements(dict, canvas, parentPath, parentRect, parentTotalSize, horizontal, elements, ref processedItems, totalItems, progress);
-
-        // Add elements to canvas in batches, yielding to UI thread between batches
-        const int batchSize = 200;  // Smaller batches for smoother progress
-        canvas.Children.Clear();
-
-        progress?.Report(0);
-
-        for (int i = 0; i < elements.Count; i += batchSize)
-        {
-            var batch = elements.Skip(i).Take(batchSize);
-            foreach (var (element, left, top) in batch)
-            {
-                Canvas.SetLeft(element, left);
-                Canvas.SetTop(element, top);
-                canvas.Children.Add(element);
-            }
-
-            // Report progress
-            int pct = (int)((i + batchSize) * 100.0 / elements.Count);
-            progress?.Report(Math.Min(pct, 100));
-
-            // Yield to UI thread at Background priority to allow rendering and progress bar updates
-            await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Background);
-        }
-
-        progress?.Report(100);
-    }
-
-    private static void CollectTreemapElements(
-        ConcurrentDictionary<string, MapDataItem> dict,
+        TreemapLookup lookup,
         Canvas canvas,
         string parentPath,
         Rect parentRect,
         long parentTotalSize,
         bool horizontal,
         List<(Control, double, double)> elements,
-        ref int processedItems,
+        int processedItems,
         int totalItems,
-        IProgress<int>? progress)
+        ProgressWindow progressWindow,
+        CancellationTokenSource cts,
+        string? rootPath = null)
     {
-        var parentDepth = dict.ContainsKey(parentPath) ? dict[parentPath].Depth : parentPath.Count(c => c == TreeMapConstants.PathSep);
-        var childKeys = dict.Keys.Where(k => k.StartsWith(parentPath) && dict[k].Depth == parentDepth + 1).OrderByDescending(k => dict[k].Size).ToList();
+        // Track root path for relative display
+        rootPath ??= parentPath;
+
+        if (cts.IsCancellationRequested) return;
+
+        // O(1) lookup instead of O(n) LINQ query!
+        var childKeys = lookup.GetChildren(parentPath);
 
         double x = parentRect.X;
         double y = parentRect.Y;
@@ -242,9 +230,12 @@ public static class TreemapPort
         double h = parentRect.Height;
         var total = (double)parentTotalSize;
         double offset = 0;
+        int itemsInThisBatch = 0;
 
         for (int i = 0; i < childKeys.Count; i++)
         {
+            if (cts.IsCancellationRequested) return;
+
             var key = childKeys[i];
             var size = dict[key].Size;
             double fraction = total == 0 ? 0 : (double)size / total;
@@ -300,7 +291,6 @@ public static class TreemapPort
                 {
                     canvas.Children.Clear();
                     long childTotal = dict.ContainsKey(capturedKey) ? dict[capturedKey].Size : capturedSize;
-                    // Use sync version for drill-down (it's typically fast for a subset)
                     MakeTreemap(dict, canvas, capturedKey, new Rect(0, 0, canvas.Bounds.Width, canvas.Bounds.Height), childTotal, !capturedHorizontal);
                     e.Handled = true;
                 }
@@ -308,6 +298,7 @@ public static class TreemapPort
 
             elements.Add((rect, r.X, r.Y));
             processedItems++;
+            itemsInThisBatch++;
 
             // Add text label
             if (r.Width > 20 && r.Height > 14)
@@ -338,18 +329,46 @@ public static class TreemapPort
                 elements.Add((txt, txtLeft, txtTop));
             }
 
-            // recurse into children if present and rectangle is large enough
-            var hasChildren = dict.Keys.Any(k => k.StartsWith(key) && dict[k].Depth == dict[key].Depth + 1);
-            if (hasChildren && (r.Width > 40 && r.Height > 20))
+            // Report progress periodically (every 50 items)
+            if (itemsInThisBatch >= 50)
             {
-                CollectTreemapElements(dict, canvas, key, r, dict[key].Size, !horizontal, elements, ref processedItems, totalItems, progress);
+                int pct = totalItems > 0 ? (int)(elements.Count * 100.0 / (totalItems * 2)) : 0;
+                var relativePath = key.StartsWith(rootPath) ? key.Substring(rootPath.Length) : key;
+                if (string.IsNullOrEmpty(relativePath)) relativePath = key;
+                progressWindow.Report(Math.Min(pct, 50), $"Collecting: {relativePath}");
+                itemsInThisBatch = 0;
+                await Task.Delay(1);
+            }
+
+            // O(1) check instead of O(n) Any() query!
+            if (lookup.HasChildren(key) && (r.Width > 40 && r.Height > 20))
+            {
+                await CollectTreemapElementsAsync(dict, lookup, canvas, key, r, dict[key].Size, !horizontal, elements, 
+                    processedItems, totalItems, progressWindow, cts, rootPath);
             }
         }
     }
 
+    // Cached lookup for sync MakeTreemap calls (drill-down operations)
+    private static TreemapLookup? _cachedLookup;
+    private static ConcurrentDictionary<string, MapDataItem>? _cachedDict;
+
     // Recursive slice-and-dice treemap. Alternates horizontal/vertical splits.
     public static void MakeTreemap(ConcurrentDictionary<string, MapDataItem> dict, Canvas canvas, string parentPath, Rect parentRect, long parentTotalSize, bool horizontal = true)
     {
+        // Build/reuse lookup for O(1) child access
+        TreemapLookup lookup;
+        if (_cachedDict == dict && _cachedLookup != null)
+        {
+            lookup = _cachedLookup;
+        }
+        else
+        {
+            lookup = new TreemapLookup(dict);
+            _cachedLookup = lookup;
+            _cachedDict = dict;
+        }
+
         // Store state for context menu operations - only on root call (when canvas is empty)
         if (canvas.Children.Count == 0)
         {
@@ -358,8 +377,8 @@ public static class TreemapPort
             CurrentHorizontal = horizontal;
         }
 
-        var parentDepth = dict.ContainsKey(parentPath) ? dict[parentPath].Depth : parentPath.Count(c => c == TreeMapConstants.PathSep);
-        var childKeys = dict.Keys.Where(k => k.StartsWith(parentPath) && dict[k].Depth == parentDepth + 1).OrderByDescending(k => dict[k].Size).ToList();
+        // O(1) lookup instead of O(n) LINQ query!
+        var childKeys = lookup.GetChildren(parentPath);
         double x = parentRect.X;
         double y = parentRect.Y;
         double w = parentRect.Width;
@@ -464,9 +483,8 @@ public static class TreemapPort
                 canvas.Children.Add(txt);
             }
 
-            // recurse into children if present and rectangle is large enough
-            var hasChildren = dict.Keys.Any(k => k.StartsWith(key) && dict[k].Depth == dict[key].Depth + 1);
-            if (hasChildren && (r.Width > 40 && r.Height > 20))
+            // O(1) check instead of O(n) Any() query!
+            if (lookup.HasChildren(key) && (r.Width > 40 && r.Height > 20))
             {
                 MakeTreemap(dict, canvas, key, r, dict[key].Size, !horizontal);
             }

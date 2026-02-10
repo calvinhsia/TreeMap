@@ -205,7 +205,7 @@ public partial class MainWindow : Window
         var swapOrientationMenuItem = this.FindControl<MenuItem>("SwapOrientationMenuItem");
         if (swapOrientationMenuItem != null)
         {
-            swapOrientationMenuItem.Click += (s, args) =>
+            swapOrientationMenuItem.Click += async (s, args) =>
             {
                 if (TreemapPort.CurrentDict != null && TreemapPort.CurrentRootPath != null)
                 {
@@ -219,8 +219,8 @@ public partial class MainWindow : Window
                             total += v.Size;
                     }
                     var rect = new Rect(0, 0, treeCanvas.Width, treeCanvas.Height);
-                    // Swap orientation
-                    TreemapPort.MakeTreemap(TreemapPort.CurrentDict, treeCanvas, rootKey, rect, total, !TreemapPort.CurrentHorizontal);
+                    // Swap orientation with progress window
+                    await TreemapPort.MakeTreemapAsync(TreemapPort.CurrentDict, treeCanvas, rootKey, rect, total, !TreemapPort.CurrentHorizontal);
                 }
             };
         }
@@ -499,7 +499,7 @@ public partial class MainWindow : Window
         Window parentWindow,
         Action<ScanResult> onScanComplete)
     {
-        using var progressWindow = new ProgressWindow("TreeMap - Scanning & Rendering", cts);
+        using var progressWindow = new ProgressWindow($"TreeMap - Scanning: {path}", cts);
         await progressWindow.ShowAsync();
 
         var statusText = this.FindControl<TextBlock>("StatusText");
@@ -508,7 +508,7 @@ public partial class MainWindow : Window
         try
         {
             // Phase 1: Disk Scanning
-            progressWindow.SetPhase("📁 Scanning Directories...");
+            progressWindow.SetPhase($"📁 Scanning: {path}");
 
             var scanResult = await DiskScanner.ScanWithErrorsAsync(path, progressWindow, cts.Token, cloudHandling);
 
@@ -587,8 +587,8 @@ public partial class MainWindow : Window
             treeCanvas.Width = rect.Width;
             treeCanvas.Height = rect.Height;
 
-            // Render with progress
-            await TreemapPort.MakeTreemapWithProgressAsync(dict, treeCanvas, rootKey, rect, total, true, cts, progressWindow);
+            // Render with progress (pass existing progress window)
+            await TreemapPort.MakeTreemapAsync(dict, treeCanvas, rootKey, rect, total, true, cts, progressWindow);
 
             statusText.Text = summary;
         }
