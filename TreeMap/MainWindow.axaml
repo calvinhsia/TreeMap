@@ -2,23 +2,29 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="TreeMap.MainWindow"
         Title="TreeMap (Avalonia)" Icon="avares://TreeMap/Assets/treemap-icon.png"
-        
+
         Width="1000" Height="700"
         WindowState="Maximized"
         Background="#FFFFFFFF">
     <Grid RowDefinitions="Auto,*">
         <StackPanel Orientation="Horizontal" Margin="8" Grid.Row="0">
             <!-- Path dropdown with MRU history -->
-            <ComboBox Name="PathCombo" Width="400" IsEditable="True" />
-            <Button Name="BrowseBtn" Content="Browse" Margin="8,0,0,0" />
-            <Button Name="ScanBtn" Content="Scan" Margin="8,0,0,0" />
-            <TextBlock Text="Cloud:" Margin="12,0,4,0" VerticalAlignment="Center" />
-            <ComboBox Name="CloudHandlingCombo" Width="140" SelectedIndex="0" VerticalAlignment="Center">
-                <ComboBoxItem Content="Show logical size" />
-                <ComboBoxItem Content="Exclude from size" />
-                <ComboBoxItem Content="Placeholder size" />
+            <ComboBox Name="PathCombo" Width="400" IsEditable="True" 
+                      ToolTip.Tip="Enter a folder path or select from recent paths" />
+            <Button Name="ScanBtn" Content="Scan" Margin="8,0,0,0"
+                    ToolTip.Tip="Scan the folder and display disk usage (Enter)" />
+            <Button Name="BrowseBtn" Content="Browse" Margin="8,0,0,0"
+                    ToolTip.Tip="Browse for a folder to scan" />
+            <TextBlock Text="Cloud:" Margin="12,0,4,0" VerticalAlignment="Center"
+                       ToolTip.Tip="How to handle OneDrive/cloud placeholder files" />
+            <ComboBox Name="CloudHandlingCombo" Width="140" SelectedIndex="0" VerticalAlignment="Center"
+                      ToolTip.Tip="Choose how cloud-only files affect size calculations">
+                <ComboBoxItem Content="Show logical size" ToolTip.Tip="Include full file size (as if downloaded)" />
+                <ComboBoxItem Content="Exclude from size" ToolTip.Tip="Don't count cloud-only files in totals" />
+                <ComboBoxItem Content="Placeholder size" ToolTip.Tip="Show actual disk usage (~1KB per placeholder)" />
             </ComboBox>
-            <Button Name="ToggleViewBtn" Content="Show File List" Margin="8,0,0,0" />
+            <Button Name="ToggleViewBtn" Content="Show File List" Margin="8,0,0,0"
+                    ToolTip.Tip="Switch between treemap visualization and file list view" />
             <TextBlock Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center" />
         </StackPanel>
 

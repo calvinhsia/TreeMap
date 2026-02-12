@@ -126,12 +126,12 @@ public partial class MainWindow : Window
         };
 
         // Helper to redraw the treemap using existing scan data (without rescanning)
-        System.Action? redrawTreemap = null;
+        System.Func<Task>? redrawTreemap = null;
 
         // Wire up cloud handling combo - recalculate sizes without rescanning
         if (cloudHandlingCombo != null)
         {
-            cloudHandlingCombo.SelectionChanged += (s, args) =>
+            cloudHandlingCombo.SelectionChanged += async (s, args) =>
             {
                 if (lastScanResult != null && lastScanResult.Data.Count > 0)
                 {
@@ -147,7 +147,8 @@ public partial class MainWindow : Window
                     browse = null;
 
                     // Redraw the treemap with updated sizes
-                    redrawTreemap?.Invoke();
+                    if (redrawTreemap != null)
+                        await redrawTreemap();
                 }
             };
         }
@@ -350,7 +351,7 @@ public partial class MainWindow : Window
         };
 
         // Define redrawTreemap - redraws treemap without rescanning (for cloud handling changes)
-        redrawTreemap = () =>
+        redrawTreemap = async () =>
         {
             if (lastScanResult == null || lastScanResult.Data.Count == 0)
                 return;
@@ -384,8 +385,8 @@ public partial class MainWindow : Window
             treeCanvas.Width = rect.Width;
             treeCanvas.Height = rect.Height;
 
-            // Redraw synchronously (data is already in memory)
-            TreemapPort.MakeTreemap(dict, treeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
+            // Redraw without progress (data is already in memory, fast)
+            await TreemapPort.MakeTreemapAsync(dict, treeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
 
             // Update status text with summary
             var statusText = this.FindControl<TextBlock>("StatusText");

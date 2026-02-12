@@ -95,16 +95,9 @@ public static class TreemapPort
     public static string? LastClickedPath { get; set; } // Set by rectangle click
 
     /// <summary>
-    /// Async treemap rendering with progress reporting.
+    /// Async treemap rendering with optional progress reporting.
+    /// If progressWindow is null and cts is null, renders directly without progress UI (fast path for drill-down).
     /// </summary>
-    /// <param name="dict">The scanned data dictionary</param>
-    /// <param name="canvas">Canvas to render to</param>
-    /// <param name="parentPath">Root path to render from</param>
-    /// <param name="parentRect">Rectangle bounds for rendering</param>
-    /// <param name="parentTotalSize">Total size of parent</param>
-    /// <param name="horizontal">Start with horizontal split</param>
-    /// <param name="cts">Cancellation token source (optional, created if null)</param>
-    /// <param name="progressWindow">Progress window to use (optional, created if null)</param>
     public static async Task MakeTreemapAsync(
         ConcurrentDictionary<string, MapDataItem> dict,
         Canvas canvas,
@@ -120,10 +113,20 @@ public static class TreemapPort
         CurrentRootPath = parentPath;
         CurrentHorizontal = horizontal;
 
-        // Create CTS if not provided
-        cts ??= new CancellationTokenSource();
+        // Build lookup once - O(n) instead of O(n²) repeated scans
+        var lookup = new TreemapLookup(dict);
 
-        // Create progress window if not provided
+        // Fast path: no progress window = render directly (for drill-down)
+        bool showProgress = progressWindow != null || cts != null;
+        if (!showProgress)
+        {
+            canvas.Children.Clear();
+            RenderChildrenDirect(dict, lookup, canvas, parentPath, parentRect, parentTotalSize, horizontal);
+            return;
+        }
+
+        // Slow path: with progress window
+        cts ??= new CancellationTokenSource();
         bool ownsProgressWindow = progressWindow == null;
         if (ownsProgressWindow)
         {
@@ -134,11 +137,8 @@ public static class TreemapPort
 
         try
         {
-            // Build lookup once - O(n) instead of O(n²) repeated scans
             progressWindow!.Report("Building index...");
-            var lookup = new TreemapLookup(dict);
 
-            // Collect all visual elements
             var elements = new List<(Control element, double left, double top)>();
             int totalItems = dict.Count;
 
@@ -156,7 +156,6 @@ public static class TreemapPort
             progressWindow.ReportProgress(0);
             progressWindow.Report($"Adding {elements.Count:n0} elements to canvas...");
 
-            // Add elements to canvas in batches
             const int batchSize = 500;
             canvas.Children.Clear();
 
@@ -168,9 +167,7 @@ public static class TreemapPort
                     break;
                 }
 
-                var batch = elements.Skip(i).Take(batchSize).ToList();
-
-                foreach (var (element, left, top) in batch)
+                foreach (var (element, left, top) in elements.Skip(i).Take(batchSize))
                 {
                     Canvas.SetLeft(element, left);
                     Canvas.SetTop(element, top);
@@ -187,13 +184,62 @@ public static class TreemapPort
             {
                 progressWindow.ReportProgress(100);
                 if (ownsProgressWindow)
-                    await Task.Delay(100); // Brief pause to show 100%
+                    await Task.Delay(100);
             }
         }
         finally
         {
             if (ownsProgressWindow)
                 progressWindow?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Direct rendering without progress (fast path for drill-down).
+    /// </summary>
+    private static void RenderChildrenDirect(
+        ConcurrentDictionary<string, MapDataItem> dict,
+        TreemapLookup lookup,
+        Canvas canvas,
+        string parentPath,
+        Rect parentRect,
+        long parentTotalSize,
+        bool horizontal)
+    {
+        var childKeys = lookup.GetChildren(parentPath);
+        double x = parentRect.X, y = parentRect.Y, w = parentRect.Width, h = parentRect.Height;
+        var total = (double)parentTotalSize;
+        double offset = 0;
+
+        for (int i = 0; i < childKeys.Count; i++)
+        {
+            var key = childKeys[i];
+            var size = dict[key].Size;
+            double fraction = total == 0 ? 0 : (double)size / total;
+
+            Rect r = horizontal 
+                ? new Rect(x + offset, y, w * fraction, h)
+                : new Rect(x, y + offset, w, h * fraction);
+            offset += horizontal ? r.Width : r.Height;
+
+            var (rect, txt) = CreateTreemapElement(dict, canvas, key, size, r, i, horizontal);
+
+            Canvas.SetLeft(rect, r.X);
+            Canvas.SetTop(rect, r.Y);
+            canvas.Children.Add(rect);
+
+            if (txt != null)
+            {
+                bool isVertical = r.Height > r.Width * 1.5 && r.Height > 60;
+                Canvas.SetLeft(txt, r.X + (isVertical ? 14 : 4));
+                Canvas.SetTop(txt, r.Y + 4);
+                canvas.Children.Add(txt);
+            }
+
+            if (lookup.HasChildren(key) && r.Width > 40 && r.Height > 20)
+            {
+                RenderChildrenDirect(dict, lookup, canvas, key, r, dict[key].Size, !horizontal);
+            }
         }
     }
 
@@ -216,18 +262,11 @@ public static class TreemapPort
         CancellationTokenSource cts,
         string? rootPath = null)
     {
-        // Track root path for relative display
         rootPath ??= parentPath;
-
         if (cts.IsCancellationRequested) return;
 
-        // O(1) lookup instead of O(n) LINQ query!
         var childKeys = lookup.GetChildren(parentPath);
-
-        double x = parentRect.X;
-        double y = parentRect.Y;
-        double w = parentRect.Width;
-        double h = parentRect.Height;
+        double x = parentRect.X, y = parentRect.Y, w = parentRect.Width, h = parentRect.Height;
         var total = (double)parentTotalSize;
         double offset = 0;
         int itemsInThisBatch = 0;
@@ -240,96 +279,25 @@ public static class TreemapPort
             var size = dict[key].Size;
             double fraction = total == 0 ? 0 : (double)size / total;
 
-            Rect r;
-            if (horizontal)
-            {
-                var rw = w * fraction;
-                r = new Rect(x + offset, y, rw, h);
-                offset += rw;
-            }
-            else
-            {
-                var rh = h * fraction;
-                r = new Rect(x, y + offset, w, rh);
-                offset += rh;
-            }
+            Rect r = horizontal 
+                ? new Rect(x + offset, y, w * fraction, h)
+                : new Rect(x, y + offset, w, h * fraction);
+            offset += horizontal ? r.Width : r.Height;
 
-            // create rectangle shape
-            var fillColor = Color.FromArgb(0xFF, (byte)((i * 97) % 255), (byte)((size / 7) % 255), (byte)(((i + 3) * 59) % 255));
-            var fillBrush = new SolidColorBrush(fillColor);
-            var rectW = r.Width < 0 ? 0 : r.Width;
-            var rectH = r.Height < 0 ? 0 : r.Height;
-
-            var isCloudItem = dict.ContainsKey(key) && dict[key].IsCloudOnly;
-            var strokeBrush = isCloudItem ? Brushes.Cyan : Brushes.Black;
-            var strokeThickness = isCloudItem ? 3.0 : 1.0;
-
-            var rect = new Avalonia.Controls.Shapes.Rectangle
-            {
-                Fill = fillBrush,
-                Width = rectW,
-                Height = rectH,
-                Stroke = strokeBrush,
-                StrokeThickness = strokeThickness
-            };
-            rect.DataContext = key;
-
-            var sizeStr = size >= 1_000_000_000 ? $"{size / 1_000_000_000.0:F2} GB" :
-                          size >= 1_000_000 ? $"{size / 1_000_000.0:F2} MB" :
-                          size >= 1_000 ? $"{size / 1_000.0:F2} KB" : $"{size} bytes";
-            var cloudInfo = isCloudItem ? $"\n☁ Contains {dict[key].CloudFileCount} cloud file(s)" : "";
-            ToolTip.SetTip(rect, $"{key}\n{sizeStr}{cloudInfo}");
-
-            // Capture for closure
-            var capturedKey = key;
-            var capturedSize = size;
-            var capturedHorizontal = horizontal;
-            rect.PointerPressed += (s, e) =>
-            {
-                LastClickedPath = capturedKey;
-                if (e.GetCurrentPoint(rect).Properties.IsLeftButtonPressed)
-                {
-                    canvas.Children.Clear();
-                    long childTotal = dict.ContainsKey(capturedKey) ? dict[capturedKey].Size : capturedSize;
-                    MakeTreemap(dict, canvas, capturedKey, new Rect(0, 0, canvas.Bounds.Width, canvas.Bounds.Height), childTotal, !capturedHorizontal);
-                    e.Handled = true;
-                }
-            };
+            // Use shared element creation
+            var (rect, txt) = CreateTreemapElement(dict, canvas, key, size, r, i, horizontal);
 
             elements.Add((rect, r.X, r.Y));
             processedItems++;
             itemsInThisBatch++;
 
-            // Add text label
-            if (r.Width > 20 && r.Height > 14)
+            if (txt != null)
             {
-                var txt = new TextBlock
-                { 
-                    Text = key,
-                    Foreground = Brushes.Black,
-                    TextTrimming = TextTrimming.CharacterEllipsis
-                };
-                txt.DataContext = key;
-
-                double txtLeft, txtTop;
-                if (r.Height > r.Width * 1.5 && r.Height > 60)
-                {
-                    txt.RenderTransform = new RotateTransform(90);
-                    txt.RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative);
-                    txt.MaxWidth = r.Height - 8;
-                    txtLeft = r.X + 14;
-                    txtTop = r.Y + 4;
-                }
-                else
-                {
-                    txt.MaxWidth = r.Width - 8;
-                    txtLeft = r.X + 4;
-                    txtTop = r.Y + 4;
-                }
-                elements.Add((txt, txtLeft, txtTop));
+                bool isVertical = r.Height > r.Width * 1.5 && r.Height > 60;
+                elements.Add((txt, r.X + (isVertical ? 14 : 4), r.Y + 4));
             }
 
-            // Report progress periodically (every 50 items)
+            // Report progress periodically
             if (itemsInThisBatch >= 50)
             {
                 int pct = totalItems > 0 ? (int)(elements.Count * 100.0 / (totalItems * 2)) : 0;
@@ -340,8 +308,7 @@ public static class TreemapPort
                 await Task.Delay(1);
             }
 
-            // O(1) check instead of O(n) Any() query!
-            if (lookup.HasChildren(key) && (r.Width > 40 && r.Height > 20))
+            if (lookup.HasChildren(key) && r.Width > 40 && r.Height > 20)
             {
                 await CollectTreemapElementsAsync(dict, lookup, canvas, key, r, dict[key].Size, !horizontal, elements, 
                     processedItems, totalItems, progressWindow, cts, rootPath);
@@ -349,145 +316,84 @@ public static class TreemapPort
         }
     }
 
-    // Cached lookup for sync MakeTreemap calls (drill-down operations)
-    private static TreemapLookup? _cachedLookup;
-    private static ConcurrentDictionary<string, MapDataItem>? _cachedDict;
-
-    // Recursive slice-and-dice treemap. Alternates horizontal/vertical splits.
-    public static void MakeTreemap(ConcurrentDictionary<string, MapDataItem> dict, Canvas canvas, string parentPath, Rect parentRect, long parentTotalSize, bool horizontal = true)
+    /// <summary>
+    /// Creates a single treemap rectangle element with event handlers.
+    /// </summary>
+    private static (Avalonia.Controls.Shapes.Rectangle rect, TextBlock? txt) CreateTreemapElement(
+        ConcurrentDictionary<string, MapDataItem> dict,
+        Canvas canvas,
+        string key,
+        long size,
+        Rect r,
+        int index,
+        bool horizontal)
     {
-        // Build/reuse lookup for O(1) child access
-        TreemapLookup lookup;
-        if (_cachedDict == dict && _cachedLookup != null)
+        var fillColor = Color.FromArgb(0xFF, (byte)((index * 97) % 255), (byte)((size / 7) % 255), (byte)(((index + 3) * 59) % 255));
+        var fillBrush = new SolidColorBrush(fillColor);
+        var rectW = r.Width < 0 ? 0 : r.Width;
+        var rectH = r.Height < 0 ? 0 : r.Height;
+
+        var isCloudItem = dict.ContainsKey(key) && dict[key].IsCloudOnly;
+        var strokeBrush = isCloudItem ? Brushes.Cyan : Brushes.Black;
+        var strokeThickness = isCloudItem ? 3.0 : 1.0;
+
+        var rect = new Avalonia.Controls.Shapes.Rectangle
         {
-            lookup = _cachedLookup;
-        }
-        else
+            Fill = fillBrush,
+            Width = rectW,
+            Height = rectH,
+            Stroke = strokeBrush,
+            StrokeThickness = strokeThickness
+        };
+        rect.DataContext = key;
+
+        var sizeStr = size >= 1_000_000_000 ? $"{size / 1_000_000_000.0:F2} GB" :
+                      size >= 1_000_000 ? $"{size / 1_000_000.0:F2} MB" :
+                      size >= 1_000 ? $"{size / 1_000.0:F2} KB" : $"{size} bytes";
+        var cloudInfo = isCloudItem ? $"\n☁ Contains {dict[key].CloudFileCount} cloud file(s)" : "";
+        ToolTip.SetTip(rect, $"{key}\n{sizeStr}{cloudInfo}");
+
+        // Capture for closure
+        var capturedKey = key;
+        var capturedSize = size;
+        var capturedHorizontal = horizontal;
+        rect.PointerPressed += async (s, e) =>
         {
-            lookup = new TreemapLookup(dict);
-            _cachedLookup = lookup;
-            _cachedDict = dict;
-        }
-
-        // Store state for context menu operations - only on root call (when canvas is empty)
-        if (canvas.Children.Count == 0)
-        {
-            CurrentDict = dict;
-            CurrentRootPath = parentPath;
-            CurrentHorizontal = horizontal;
-        }
-
-        // O(1) lookup instead of O(n) LINQ query!
-        var childKeys = lookup.GetChildren(parentPath);
-        double x = parentRect.X;
-        double y = parentRect.Y;
-        double w = parentRect.Width;
-        double h = parentRect.Height;
-
-        var total = (double)parentTotalSize;
-        double offset = 0;
-
-        for (int i = 0; i < childKeys.Count; i++)
-        {
-            var key = childKeys[i];
-            var size = dict[key].Size;
-            double fraction = total == 0 ? 0 : (double)size / total;
-
-            Rect r;
-            if (horizontal)
+            LastClickedPath = capturedKey;
+            if (e.GetCurrentPoint(rect).Properties.IsLeftButtonPressed)
             {
-                var rw = w * fraction;
-                r = new Rect(x + offset, y, rw, h);
-                offset += rw;
+                // Drill-down: no progress window = fast direct rendering
+                canvas.Children.Clear();
+                long childTotal = dict.ContainsKey(capturedKey) ? dict[capturedKey].Size : capturedSize;
+                await MakeTreemapAsync(dict, canvas, capturedKey, new Rect(0, 0, canvas.Bounds.Width, canvas.Bounds.Height), childTotal, !capturedHorizontal);
+                e.Handled = true;
+            }
+        };
+
+        // Create text label if rectangle is large enough
+        TextBlock? txt = null;
+        if (r.Width > 20 && r.Height > 14)
+        {
+            txt = new TextBlock
+            { 
+                Text = key,
+                Foreground = Brushes.Black,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            txt.DataContext = key;
+
+            if (r.Height > r.Width * 1.5 && r.Height > 60)
+            {
+                txt.RenderTransform = new RotateTransform(90);
+                txt.RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative);
+                txt.MaxWidth = r.Height - 8;
             }
             else
             {
-                var rh = h * fraction;
-                r = new Rect(x, y + offset, w, rh);
-                offset += rh;
-            }
-
-            // create rectangle shape
-            var fillColor = Avalonia.Media.Color.FromArgb(0xFF, (byte)((i * 97) % 255), (byte)((size / 7) % 255), (byte)(((i + 3) * 59) % 255));
-            var fillBrush = new SolidColorBrush(fillColor);
-            var rectW = r.Width < 0 ? 0 : r.Width;
-            var rectH = r.Height < 0 ? 0 : r.Height;
-
-            // Check if this item contains cloud-only files
-            var isCloudItem = dict.ContainsKey(key) && dict[key].IsCloudOnly;
-            var strokeBrush = isCloudItem ? Brushes.Cyan : Brushes.Black;
-            var strokeThickness = isCloudItem ? 3.0 : 1.0;
-
-            var rect = new Avalonia.Controls.Shapes.Rectangle
-            {
-                Fill = fillBrush,
-                Width = rectW,
-                Height = rectH,
-                Stroke = strokeBrush,
-                StrokeThickness = strokeThickness
-            };
-            rect.DataContext = key;
-            // Tooltip shows full path and size (and cloud status)
-            var sizeStr = size >= 1_000_000_000 ? $"{size / 1_000_000_000.0:F2} GB" :
-                          size >= 1_000_000 ? $"{size / 1_000_000.0:F2} MB" :
-                          size >= 1_000 ? $"{size / 1_000.0:F2} KB" : $"{size} bytes";
-            var cloudInfo = isCloudItem ? $"\n☁ Contains {dict[key].CloudFileCount} cloud file(s)" : "";
-            ToolTip.SetTip(rect, $"{key}\n{sizeStr}{cloudInfo}");
-            rect.PointerPressed += (s, e) =>
-            {
-                // Track last clicked path for context menu operations
-                LastClickedPath = key;
-
-                // Only drill down on LEFT click, not right click (which opens context menu)
-                if (e.GetCurrentPoint(rect).Properties.IsLeftButtonPressed)
-                {
-                    // on click, just redraw treemap for this node (drill down)
-                    canvas.Children.Clear();
-                    long childTotal = dict.ContainsKey(key) ? dict[key].Size : size;
-                    MakeTreemap(dict, canvas, key, new Rect(0, 0, canvas.Bounds.Width, canvas.Bounds.Height), childTotal, !horizontal);
-                    e.Handled = true;
-                }
-            };
-
-            Canvas.SetLeft(rect, r.X);
-            Canvas.SetTop(rect, r.Y);
-            canvas.Children.Add(rect);
-
-            // Add text label - show full path like WPF version
-            // Use vertical text for tall narrow rectangles
-            if (r.Width > 20 && r.Height > 14)
-            {
-                var txt = new TextBlock
-                { 
-                    Text = key, // Full path
-                    Foreground = Brushes.Black,
-                    TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
-                };
-                txt.DataContext = key;
-                
-                // Rotate text 90 degrees for tall narrow rectangles (height > width)
-                if (r.Height > r.Width * 1.5 && r.Height > 60)
-                {
-                    txt.RenderTransform = new RotateTransform(90);
-                    txt.RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative);
-                    txt.MaxWidth = r.Height - 8; // Use height as max width since rotated
-                    Canvas.SetLeft(txt, r.X + 14);
-                    Canvas.SetTop(txt, r.Y + 4);
-                }
-                else
-                {
-                    txt.MaxWidth = r.Width - 8;
-                    Canvas.SetLeft(txt, r.X + 4);
-                    Canvas.SetTop(txt, r.Y + 4);
-                }
-                canvas.Children.Add(txt);
-            }
-
-            // O(1) check instead of O(n) Any() query!
-            if (lookup.HasChildren(key) && (r.Width > 40 && r.Height > 20))
-            {
-                MakeTreemap(dict, canvas, key, r, dict[key].Size, !horizontal);
+                txt.MaxWidth = r.Width - 8;
             }
         }
+
+        return (rect, txt);
     }
 }

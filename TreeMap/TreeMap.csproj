@@ -10,6 +10,8 @@
     <Nullable>disable</Nullable>
     <!-- Prevent SDK from auto-generating assembly attributes because this project defines them in Properties/AssemblyInfo.cs -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Windows application icon (embedded in exe, shows in taskbar/explorer) -->
+    <ApplicationIcon>Assets\treemap-icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,6 +31,7 @@
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\treemap-icon.png" />
+    <AvaloniaResource Include="Assets\treemap-icon.ico" />
   </ItemGroup>
 
   <ItemGroup>
