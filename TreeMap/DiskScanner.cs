@@ -18,6 +18,9 @@ namespace TreeMap
         public int SkippedSymlinks { get; set; }
         public int CloudFileCount { get; set; }
         public long CloudFileLogicalSize { get; set; } // Size if all cloud files were downloaded
+        // RootPath of the scan (trailing path separator included). Set by ScanWithErrorsAsync so callers
+        // don't need to infer the root from the dictionary keys.
+        public string? RootPath { get; set; }
 
         public bool HasErrors => Errors.Count > 0;
         public string ErrorSummary => HasErrors 
@@ -110,6 +113,8 @@ namespace TreeMap
 
             return Task.Run(async () =>
             {
+                // Record the root path on the result so callers can avoid re-inferring it from keys
+                result.RootPath = rootPath;
                 await ScanInternal(rootPath, rootPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
                 return result;
             }, cancellationToken);

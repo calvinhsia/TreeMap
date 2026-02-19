@@ -56,7 +56,7 @@ public partial class MainWindow : Window
         }
 
         // Helper to get current path from editable combo
-        Func<string> getPath = () => 
+        Func<string> getPath = () =>
         {
             // For editable ComboBox, the text is in the SelectedItem or we need to get it differently
             var text = pathCombo?.SelectedItem?.ToString();
@@ -160,15 +160,47 @@ public partial class MainWindow : Window
             // Create BrowseControl on first show, using last scan results
             if (showFileList && browse == null && lastScanResult != null)
             {
-                var items = new System.Collections.Generic.List<object>();
-                foreach (var kv in lastScanResult.Data)
-                    items.Add(new { 
-                        Path = kv.Key, 
-                        Size = kv.Value.Size,
-                        Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
-                        CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : ""
-                    });
-                browse = new BrowseControl(items, new[] { 500, 100, 60, 70 }, true);
+                //var items = new System.Collections.Generic.List<object>();
+                //foreach (var kv in lastScanResult.Data)
+                //    items.Add(new { 
+                //        Path = kv.Key, 
+                //        Size = kv.Value.Size,
+                //        Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
+                //        CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : ""
+                //    });
+                /*
+•	LocalSize = bytes actually stored locally on disk (sum of file lengths for files that are present locally).
+•	CloudLogicalSize = bytes that cloud-only files would take if downloaded (logical size reported by metadata/reparse point).
+•	Size = the displayed/used size after applying the chosen cloud-handling policy:
+•	IncludeLogicalSize (default): Size = LocalSize + CloudLogicalSize
+•	ExcludeFromSize: Size = LocalSize
+•	IncludePlaceholderSize: Size = LocalSize + (~1 KB per cloud file) (DiskScanner uses a 1024 byte placeholder estimate)
+Implementation notes (from the code)
+•	DiskScanner.ScanInternal tracks LocalSize and CloudLogicalSize separately and stores them on each MapDataItem.
+•	DiskScanner.CalculateSize(localSize, cloudLogicalSize, cloudFileCount, cloudHandling) computes Size according to the policy.
+•	DiskScanner.RecalculateSizes(result, cloudHandling) recomputes each MapDataItem.Size from LocalSize and CloudLogicalSize without rescanning.
+•	Diff (what you added) = Size - LocalSize shows the extra bytes coming from cloud logical size or placeholder estimates. Example: if LocalSize=100MB, CloudLogicalSize=900MB:
+•	IncludeLogicalSize -> Size=100+900=1000MB, Diff=900MB
+•	ExcludeFromSize -> Size=100MB, Diff=0
+•	Includ                 */
+                // Use the recorded scan root if available to save horizontal space; otherwise fall back to inferring
+                var rootPrefix = lastScanResult.RootPath ?? string.Empty;
+                var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
+
+                var items = from kv in lastScanResult.Data
+                            select new
+                            {
+                                // Remove the root prefix to save horizontal space in the list
+                                Path = kv.Key.Substring(rootLength),
+                                Size = kv.Value.Size,
+                                LocalSize = kv.Value.LocalSize,
+                                kv.Value.CloudLogicalSize,
+                                Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
+                                CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : "",
+                                kv.Value.IsCloudOnly,
+                                kv.Value.Depth,
+                            };
+                browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
                 left.Content = browse;
             }
 
@@ -306,7 +338,7 @@ public partial class MainWindow : Window
                 if (!initialScanDone && treeCanvasHost.Bounds.Width > 0 && treeCanvasHost.Bounds.Height > 0)
                 {
                     initialScanDone = true;
-                    var initialPath = settings.MruPaths.Count > 0 
+                    var initialPath = settings.MruPaths.Count > 0
                         ? settings.MruPaths[0]
                         : System.IO.Directory.GetCurrentDirectory();
                     setPath(initialPath);
@@ -358,13 +390,16 @@ public partial class MainWindow : Window
             var dict = lastScanResult.Data;
             treeCanvas.Children.Clear();
 
-            // Find root key
-            string? rootKey = null;
-            foreach (var k in dict.Keys)
+            // Use the recorded scan root if available; otherwise fall back to inferring the root key
+            string? rootKey = lastScanResult?.RootPath;
+            if (rootKey == null)
             {
-                if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                foreach (var k in dict.Keys)
                 {
-                    if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                    if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                    {
+                        if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                    }
                 }
             }
             if (rootKey == null)
@@ -466,8 +501,8 @@ public partial class MainWindow : Window
         // Trigger an automatic initial scan of current directory after layout settles
         this.AttachedToVisualTree += (s, e) =>
         {
-            var initialPath = settings.MruPaths.Count > 0 
-                ? settings.MruPaths[0] 
+            var initialPath = settings.MruPaths.Count > 0
+                ? settings.MruPaths[0]
                 : System.IO.Directory.GetCurrentDirectory();
             setPath(initialPath);
             // schedule scan after layout so canvas has real bounds
@@ -479,8 +514,8 @@ public partial class MainWindow : Window
 
         // Also schedule an initial scan immediately after OnOpened to ensure we run
         // when AttachedToVisualTree did not fire early enough.
-        var initPathNow = settings.MruPaths.Count > 0 
-            ? settings.MruPaths[0] 
+        var initPathNow = settings.MruPaths.Count > 0
+            ? settings.MruPaths[0]
             : System.IO.Directory.GetCurrentDirectory();
         Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
     }
@@ -527,10 +562,10 @@ public partial class MainWindow : Window
                 summary += $", Symlinks: {scanResult.SkippedSymlinks}";
             if (scanResult.CloudFileCount > 0)
             {
-                var cloudSizeStr = scanResult.CloudFileLogicalSize >= 1_000_000_000 
-                    ? $"{scanResult.CloudFileLogicalSize / 1_000_000_000.0:F1}GB" 
-                    : scanResult.CloudFileLogicalSize >= 1_000_000 
-                        ? $"{scanResult.CloudFileLogicalSize / 1_000_000.0:F1}MB" 
+                var cloudSizeStr = scanResult.CloudFileLogicalSize >= 1_000_000_000
+                    ? $"{scanResult.CloudFileLogicalSize / 1_000_000_000.0:F1}GB"
+                    : scanResult.CloudFileLogicalSize >= 1_000_000
+                        ? $"{scanResult.CloudFileLogicalSize / 1_000_000.0:F1}MB"
                         : $"{scanResult.CloudFileLogicalSize / 1_000.0:F1}KB";
                 summary += $", Cloud: {scanResult.CloudFileCount} ({cloudSizeStr})";
             }
@@ -561,13 +596,16 @@ public partial class MainWindow : Window
 
             treeCanvas.Children.Clear();
 
-            // Find root key
-            string? rootKey = null;
-            foreach (var k in dict.Keys)
+            // Prefer the root path recorded on the scan result; otherwise infer from keys
+            string? rootKey = scanResult.RootPath;
+            if (rootKey == null)
             {
-                if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                foreach (var k in dict.Keys)
                 {
-                    if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                    if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                    {
+                        if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                    }
                 }
             }
             rootKey ??= path + TreeMapConstants.PathSep;
