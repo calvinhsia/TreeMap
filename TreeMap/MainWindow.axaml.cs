@@ -252,7 +252,7 @@ Implementation notes (from the code)
 
         // Use the Border (TreeCanvasHost) to detect valid bounds since Canvas doesn't stretch
         bool initialScanDone = false;
-        System.Action<string>? runScan = null;
+        //System.Action<string>? runScan = null;
         TreeCanvasHost.LayoutUpdated += (s, ev) =>
         {
             try
@@ -265,49 +265,16 @@ Implementation notes (from the code)
                         : System.IO.Directory.GetCurrentDirectory();
                     SetPath(this.PathCombo, initialPath);
                     //Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initialPath), Avalonia.Threading.DispatcherPriority.Background);
-                    runScan?.Invoke(initialPath);
+                    runScan(initialPath);
                 }
             }
             catch { }
         };
 
         // Helper to run a scan asynchronously and draw the treemap for a given path
-        runScan = (path) =>
-        {
-            // Add to MRU before scanning
-            AddToMruList(path, _userSettings, CloudHandlingCombo, this.PathCombo);
-            // Switch to treemap view if currently showing file list (file list becomes stale with new scan)
-            if (LeftHost.IsVisible)
-            {
-                LeftHost.IsVisible = false;
-                TreeCanvasHost.IsVisible = true;
-                var newText = "Show File List";
-                if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
-                if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
-                var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
-                if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
-            }
-
-            // Create unified progress window for both scanning and rendering
-            var cts = new System.Threading.CancellationTokenSource();
-
-            // Get the selected cloud handling mode
-            var cloudHandling = GetCloudHandling(CloudHandlingCombo);
-
-            // Run the combined scan + render operation
-            _ = RunScanAndRenderAsync(path, cloudHandling, cts, TreeCanvas, TreeCanvasHost, this,
-                result =>
-                {
-                    _lastScanResult = result;
-                    _browse = null;
-                    try
-                    {
-                        // Ensure the UI shows the path that was scanned
-                        SetPath(this.PathCombo, path);
-                    }
-                    catch { }
-                });
-        };
+        //runScan = (path) =>
+        //{
+        //};
 
         // Define redrawTreemap - redraws treemap without rescanning (for cloud handling changes)
 
@@ -328,7 +295,7 @@ Implementation notes (from the code)
             if (args.AddedItems.Count > 0 && args.AddedItems[0] is string selectedPath)
             {
                 // Only scan if selection actually changed (not just programmatic refresh)
-                if (!string.IsNullOrEmpty(selectedPath) && runScan != null)
+                if (!string.IsNullOrEmpty(selectedPath))
                 {
                     runScan(selectedPath);
                 }
@@ -382,7 +349,7 @@ Implementation notes (from the code)
             // schedule scan after layout so canvas has real bounds
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                runScan?.Invoke(initialPath);
+                runScan(initialPath);
             }, Avalonia.Threading.DispatcherPriority.Background);
         };
 
@@ -391,7 +358,45 @@ Implementation notes (from the code)
         var initPathNow = _userSettings.MruPaths.Count > 0
             ? _userSettings.MruPaths[0]
             : System.IO.Directory.GetCurrentDirectory();
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    void runScan(string path)
+    {
+        // Add to MRU before scanning
+        AddToMruList(path, CloudHandlingCombo, this.PathCombo);
+        // Switch to treemap view if currently showing file list (file list becomes stale with new scan)
+        if (LeftHost.IsVisible)
+        {
+            LeftHost.IsVisible = false;
+            TreeCanvasHost.IsVisible = true;
+            var newText = "Show File List";
+            if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
+            if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
+            var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
+            if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
+        }
+
+        // Create unified progress window for both scanning and rendering
+        var cts = new System.Threading.CancellationTokenSource();
+
+        // Get the selected cloud handling mode
+        var cloudHandling = GetCloudHandling(CloudHandlingCombo);
+
+        // Run the combined scan + render operation
+        _ = RunScanAndRenderAsync(path, cloudHandling, cts, TreeCanvas, TreeCanvasHost, this,
+            result =>
+            {
+                _lastScanResult = result;
+                _browse = null;
+                try
+                {
+                    // Ensure the UI shows the path that was scanned
+                    SetPath(this.PathCombo, path);
+                }
+                catch { }
+            });
+
     }
 
     private void RedrawTreemap()
@@ -471,19 +476,19 @@ Implementation notes (from the code)
         }
     }
 
-    private void AddToMruList(string path, UserSettings settings, ComboBox? cloudHandlingCombo, ComboBox pathCombo)
+    private void AddToMruList(string path, ComboBox? cloudHandlingCombo, ComboBox pathCombo)
     {
-        if (_isRefreshingCombo)
+        if (_isRefreshingCombo || _userSettings == null)
             return;
 
-        settings.AddMruPath(path);
-        settings.CloudHandlingIndex = cloudHandlingCombo?.SelectedIndex ?? 0;
-        settings.Save();
+        _userSettings.AddMruPath(path);
+        _userSettings.CloudHandlingIndex = cloudHandlingCombo?.SelectedIndex ?? 0;
+        _userSettings.Save();
 
         _isRefreshingCombo = true;
         pathCombo.SelectedIndex = -1;
         pathCombo.Items.Clear();
-        foreach (var mruPath in settings.MruPaths)
+        foreach (var mruPath in _userSettings.MruPaths)
             pathCombo.Items.Add(mruPath);
         if (pathCombo.Items.Count > 0)
             pathCombo.SelectedIndex = 0;
