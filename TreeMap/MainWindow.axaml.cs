@@ -1,19 +1,19 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml;
+using Avalonia.VisualTree;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Avalonia;
-using Avalonia.Controls;
-using Avalonia.Interactivity;
-using Avalonia.Markup.Xaml;
-using Avalonia.VisualTree;
 
 namespace TreeMap;
 
 public partial class MainWindow : Window
 {
     // promoted shared state to instance fields to simplify extraction of helpers
-    private BrowseControl? _browse;
     private ScanResult? _lastScanResult;
     private bool _isRefreshingCombo;
     private UserSettings? _userSettings;
@@ -49,7 +49,6 @@ public partial class MainWindow : Window
 
         _isRefreshingCombo = false;
         // BrowseControl and last scan stored on instance fields
-        _browse = null;
         _lastScanResult = null;
 
 
@@ -67,93 +66,91 @@ public partial class MainWindow : Window
                     DiskScanner.RecalculateSizes(_lastScanResult, cloudHandling);
                     _userSettings.CloudHandlingIndex = CloudHandlingCombo.SelectedIndex;
                     _userSettings.Save();
-                    _browse = null;
                     this.RedrawTreemap();
                     //RedrawTreemap(TreeCanvas, TreeCanvasHost, CloudHandlingCombo);
                 }
             };
         }
-
-        // Helper to toggle between treemap and file list views
-        System.Action toggleView = () =>
+        this.ShowFileListBtn.Click += (o, e) =>
         {
-            bool showFileList = !LeftHost.IsVisible;
-
-            // Create BrowseControl on first show, using last scan results
-            if (showFileList && _browse == null && _lastScanResult != null)
-            {
-                //var items = new System.Collections.Generic.List<object>();
-                //foreach (var kv in lastScanResult.Data)
-                //    items.Add(new { 
-                //        Path = kv.Key, 
-                //        Size = kv.Value.Size,
-                //        Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
-                //        CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : ""
-                //    });
-                /*
-•	LocalSize = bytes actually stored locally on disk (sum of file lengths for files that are present locally).
-•	CloudLogicalSize = bytes that cloud-only files would take if downloaded (logical size reported by metadata/reparse point).
-•	Size = the displayed/used size after applying the chosen cloud-handling policy:
-•	IncludeLogicalSize (default): Size = LocalSize + CloudLogicalSize
-•	ExcludeFromSize: Size = LocalSize
-•	IncludePlaceholderSize: Size = LocalSize + (~1 KB per cloud file) (DiskScanner uses a 1024 byte placeholder estimate)
-Implementation notes (from the code)
-•	DiskScanner.ScanInternal tracks LocalSize and CloudLogicalSize separately and stores them on each MapDataItem.
-•	DiskScanner.CalculateSize(localSize, cloudLogicalSize, cloudFileCount, cloudHandling) computes Size according to the policy.
-•	DiskScanner.RecalculateSizes(result, cloudHandling) recomputes each MapDataItem.Size from LocalSize and CloudLogicalSize without rescanning.
-•	Diff (what you added) = Size - LocalSize shows the extra bytes coming from cloud logical size or placeholder estimates. Example: if LocalSize=100MB, CloudLogicalSize=900MB:
-•	IncludeLogicalSize -> Size=100+900=1000MB, Diff=900MB
-•	ExcludeFromSize -> Size=100MB, Diff=0
-•	Includ                 */
-                // Use the recorded scan root if available to save horizontal space; otherwise fall back to inferring
-                var rootPrefix = _lastScanResult.RootPath ?? string.Empty;
-                var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
-
-                var items = from kv in _lastScanResult.Data
-                            select new
-                            {
-                                // Remove the root prefix to save horizontal space in the list
-                                Path = kv.Key.Substring(rootLength),
-                                Size = kv.Value.Size,
-                                LocalSize = kv.Value.LocalSize,
-                                kv.Value.CloudLogicalSize,
-                                Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
-                                CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : "",
-                                kv.Value.IsCloudOnly,
-                                kv.Value.Depth,
-                            };
-                _browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
-                LeftHost.Content = _browse;
-            }
-
-            LeftHost.IsVisible = showFileList;
-            TreeCanvasHost.IsVisible = !showFileList;
-
-            // Update button and menu text
-            var newText = showFileList ? "Show Treemap" : "Show File List";
-            if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
-            if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
-            // Update the file list context menu too
-            var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
-            if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
+            this.ShowBrowseList();
         };
 
-        // Wire up toggle button
-        if (ToggleViewBtn != null)
-        {
-            ToggleViewBtn.Click += (s, args) => toggleView();
-        }
+        //        // Helper to toggle between treemap and file list views
+        //        System.Action toggleView = () =>
+        //        {
+        //            bool showFileList = !LeftHost.IsVisible;
 
-        // Wire up context menu items (both treemap and file list)
-        if (ToggleBrowseMenuItem != null)
-        {
-            ToggleBrowseMenuItem.Click += (s, args) => toggleView();
-        }
-        var toggleTreemapMenuItemInit = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
-        if (toggleTreemapMenuItemInit != null)
-        {
-            toggleTreemapMenuItemInit.Click += (s, args) => toggleView();
-        }
+        //            // Create BrowseControl on first show, using last scan results
+        //            if (showFileList && _browse == null && _lastScanResult != null)
+        //            {
+        //                //var items = new System.Collections.Generic.List<object>();
+        //                //foreach (var kv in lastScanResult.Data)
+        //                //    items.Add(new { 
+        //                //        Path = kv.Key, 
+        //                //        Size = kv.Value.Size,
+        //                //        Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
+        //                //        CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : ""
+        //                //    });
+        //                /*
+        //•	LocalSize = bytes actually stored locally on disk (sum of file lengths for files that are present locally).
+        //•	CloudLogicalSize = bytes that cloud-only files would take if downloaded (logical size reported by metadata/reparse point).
+        //•	Size = the displayed/used size after applying the chosen cloud-handling policy:
+        //•	IncludeLogicalSize (default): Size = LocalSize + CloudLogicalSize
+        //•	ExcludeFromSize: Size = LocalSize
+        //•	IncludePlaceholderSize: Size = LocalSize + (~1 KB per cloud file) (DiskScanner uses a 1024 byte placeholder estimate)
+        //Implementation notes (from the code)
+        //•	DiskScanner.ScanInternal tracks LocalSize and CloudLogicalSize separately and stores them on each MapDataItem.
+        //•	DiskScanner.CalculateSize(localSize, cloudLogicalSize, cloudFileCount, cloudHandling) computes Size according to the policy.
+        //•	DiskScanner.RecalculateSizes(result, cloudHandling) recomputes each MapDataItem.Size from LocalSize and CloudLogicalSize without rescanning.
+        //•	Diff (what you added) = Size - LocalSize shows the extra bytes coming from cloud logical size or placeholder estimates. Example: if LocalSize=100MB, CloudLogicalSize=900MB:
+        //•	IncludeLogicalSize -> Size=100+900=1000MB, Diff=900MB
+        //•	ExcludeFromSize -> Size=100MB, Diff=0
+        //•	Includ                 */
+        //                // Use the recorded scan root if available to save horizontal space; otherwise fall back to inferring
+        //                var rootPrefix = _lastScanResult.RootPath ?? string.Empty;
+        //                var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
+
+        //                var items = from kv in _lastScanResult.Data
+        //                            select new
+        //                            {
+        //                                // Remove the root prefix to save horizontal space in the list
+        //                                Path = kv.Key.Substring(rootLength),
+        //                                Size = kv.Value.Size,
+        //                                LocalSize = kv.Value.LocalSize,
+        //                                kv.Value.CloudLogicalSize,
+        //                                Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
+        //                                CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : "",
+        //                                kv.Value.IsCloudOnly,
+        //                                kv.Value.Depth,
+        //                            };
+        //                _browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
+        //                LeftHost.Content = _browse;
+        //            }
+
+        //            LeftHost.IsVisible = showFileList;
+        //            TreeCanvasHost.IsVisible = !showFileList;
+
+        //            // Update button and menu text
+        //            var newText = showFileList ? "Show Treemap" : "Show File List";
+        //            if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
+        //            if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
+        //            // Update the file list context menu too
+        //            var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
+        //            if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
+        //        };
+
+
+        //// Wire up context menu items (both treemap and file list)
+        //if (ToggleBrowseMenuItem != null)
+        //{
+        //    ToggleBrowseMenuItem.Click += (s, args) => toggleView();
+        //}
+        //var toggleTreemapMenuItemInit = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
+        //if (toggleTreemapMenuItemInit != null)
+        //{
+        //    toggleTreemapMenuItemInit.Click += (s, args) => toggleView();
+        //}
 
         // Wire up swap orientation menu item
         var swapOrientationMenuItem = this.FindControl<MenuItem>("SwapOrientationMenuItem");
@@ -361,21 +358,94 @@ Implementation notes (from the code)
         Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
     }
 
+    void ShowBrowseList()
+    {
+        try
+        {
+            /*
+•	LocalSize = bytes actually stored locally on disk (sum of file lengths for files that are present locally).
+•	CloudLogicalSize = bytes that cloud-only files would take if downloaded (logical size reported by metadata/reparse point).
+•	Size = the displayed/used size after applying the chosen cloud-handling policy:
+•	IncludeLogicalSize (default): Size = LocalSize + CloudLogicalSize
+•	ExcludeFromSize: Size = LocalSize
+•	IncludePlaceholderSize: Size = LocalSize + (~1 KB per cloud file) (DiskScanner uses a 1024 byte placeholder estimate)
+Implementation notes (from the code)
+•	DiskScanner.ScanInternal tracks LocalSize and CloudLogicalSize separately and stores them on each MapDataItem.
+•	DiskScanner.CalculateSize(localSize, cloudLogicalSize, cloudFileCount, cloudHandling) computes Size according to the policy.
+•	DiskScanner.RecalculateSizes(result, cloudHandling) recomputes each MapDataItem.Size from LocalSize and CloudLogicalSize without rescanning.
+•	Diff (what you added) = Size - LocalSize shows the extra bytes coming from cloud logical size or placeholder estimates. Example: if LocalSize=100MB, CloudLogicalSize=900MB:
+•	IncludeLogicalSize -> Size=100+900=1000MB, Diff=900MB
+•	ExcludeFromSize -> Size=100MB, Diff=0
+•	Includ                 */
+            // Use the recorded scan root if available to save horizontal space; otherwise fall back to inferring
+            if (_lastScanResult == null)
+            {
+                return;
+            }
+            var rootPrefix = _lastScanResult.RootPath ?? string.Empty;
+            var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
+
+            var items = from kv in _lastScanResult.Data
+                        select new
+                        {
+                            // Remove the root prefix to save horizontal space in the list
+                            Path = kv.Key.Substring(rootLength),
+                            Size = kv.Value.Size,
+                            LocalSize = kv.Value.LocalSize,
+                            kv.Value.CloudLogicalSize,
+                            Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
+                            CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : "",
+                            kv.Value.IsCloudOnly,
+                            kv.Value.Depth,
+                        };
+            var browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
+            var fileListWIndow = new Window()
+            {
+                WindowState = WindowState.Maximized,
+                ShowInTaskbar = false
+            };
+            fileListWIndow.Content = browse;
+            fileListWIndow.Show(this);
+
+        }
+        catch (System.Exception ex)
+        {
+            StatusText.Text = ex.Message;
+        }
+    }
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e.KeyModifiers == KeyModifiers.Alt)
+        {
+            switch (e.Key)
+            {
+                case Key.F:
+                    ShowBrowseList();
+                    break;
+                case Key.Q:
+                    Close();
+                    break;
+            }
+
+        }
+    }
+
     void runScan(string path)
     {
         // Add to MRU before scanning
         AddToMruList(path, CloudHandlingCombo, this.PathCombo);
         // Switch to treemap view if currently showing file list (file list becomes stale with new scan)
-        if (LeftHost.IsVisible)
-        {
-            LeftHost.IsVisible = false;
-            TreeCanvasHost.IsVisible = true;
-            var newText = "Show File List";
-            if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
-            if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
-            var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
-            if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
-        }
+        //if (LeftHost.IsVisible)
+        //{
+        //    LeftHost.IsVisible = false;
+        //    TreeCanvasHost.IsVisible = true;
+        //    var newText = "Show File List";
+        //    if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
+        //    if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
+        //    var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
+        //    if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
+        //}
 
         // Create unified progress window for both scanning and rendering
         var cts = new System.Threading.CancellationTokenSource();
@@ -388,7 +458,6 @@ Implementation notes (from the code)
             result =>
             {
                 _lastScanResult = result;
-                _browse = null;
                 try
                 {
                     // Ensure the UI shows the path that was scanned
@@ -440,8 +509,7 @@ Implementation notes (from the code)
         TreemapPort.MakeTreemap(dict, TreeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
 
         // Update status text with summary
-        var statusText = this.FindControl<TextBlock>("StatusText");
-        if (statusText != null)
+        if (StatusText != null)
         {
             var cloudHandling = GetCloudHandling(CloudHandlingCombo);
             var modeStr = cloudHandling switch
@@ -450,7 +518,7 @@ Implementation notes (from the code)
                 CloudFileHandling.IncludePlaceholderSize => "Cloud: Placeholder",
                 _ => "Cloud: Logical Size"
             };
-            statusText.Text = $"Items: {dict.Count:n0}, {modeStr}";
+            StatusText.Text = $"Items: {dict.Count:n0}, {modeStr}";
         }
 
     }

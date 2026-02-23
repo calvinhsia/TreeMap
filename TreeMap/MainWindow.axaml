@@ -18,28 +18,27 @@
                 <ComboBoxItem Content="Exclude from size" />
                 <ComboBoxItem Content="Placeholder size" />
             </ComboBox>
-            <Button Name="ToggleViewBtn" Content="Show File List" Margin="8,0,0,0" />
+            <Button Name="ShowFileListBtn" Content="Show File List" Margin="8,0,0,0" ToolTip.Tip="Show the raw data in a sortable exportable view (Alt-F)"/>
             <TextBlock Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center" />
         </StackPanel>
 
-        <!-- Content area - either treemap or file list (full window each) -->
         <Grid Name="ContentGrid" Grid.Row="1">
             <!-- File list - hidden by default, takes full space when shown -->
-            <ContentControl Name="LeftHost" Background="#FFF8F8F8" IsVisible="False">
+            <!--<ContentControl Name="LeftHost" Background="#FFF8F8F8" IsVisible="False">
                 <ContentControl.ContextMenu>
                     <ContextMenu>
                         <MenuItem Name="ToggleTreemapMenuItem" Header="Show Treemap" />
                     </ContextMenu>
                 </ContentControl.ContextMenu>
-            </ContentControl>
+            </ContentControl>-->
             <!-- Treemap - visible by default, takes full space -->
             <Border Name="TreeCanvasHost" Background="#FFFFFFFF" ClipToBounds="True">
                 <Canvas Name="TreeCanvas">
                     <Canvas.ContextMenu>
                         <ContextMenu>
-                            <MenuItem Name="ToggleBrowseMenuItem" Header="Show File List" />
-                            <Separator />
+                            <!--<MenuItem Name="ToggleBrowseMenuItem" Header="Show File List" />-->
                             <MenuItem Name="SwapOrientationMenuItem" Header="Swap Horizontal/Vertical" />
+                            <Separator />
                             <MenuItem Name="OpenExplorerMenuItem" Header="Open in Explorer" />
                             <MenuItem Name="NewWindowMenuItem" Header="New Window at Selection" />
                         </ContextMenu>
