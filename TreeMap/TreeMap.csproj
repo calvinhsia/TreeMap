@@ -7,7 +7,7 @@
     <RootNamespace>TreeMap</RootNamespace>
     <AssemblyName>TreeMap</AssemblyName>
     <LangVersion>latest</LangVersion>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
     <!-- Prevent SDK from auto-generating assembly attributes because this project defines them in Properties/AssemblyInfo.cs -->
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>

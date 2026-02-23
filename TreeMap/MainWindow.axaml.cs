@@ -12,142 +12,64 @@ namespace TreeMap;
 
 public partial class MainWindow : Window
 {
+    // promoted shared state to instance fields to simplify extraction of helpers
+    private BrowseControl? _browse;
+    private ScanResult? _lastScanResult;
+    private bool _isRefreshingCombo;
+    private UserSettings? _userSettings;
+
     public MainWindow()
     {
         InitializeComponent();
     }
 
-    private void InitializeComponent()
-    {
-        AvaloniaXamlLoader.Load(this);
-    }
-
     protected override void OnOpened(System.EventArgs e)
     {
         base.OnOpened(e);
-        var pathCombo = this.FindControl<ComboBox>("PathCombo");
-        var scan = this.FindControl<Button>("ScanBtn");
-        var browseBtn = this.FindControl<Button>("BrowseBtn");
-        var toggleViewBtn = this.FindControl<Button>("ToggleViewBtn");
-        var cloudHandlingCombo = this.FindControl<ComboBox>("CloudHandlingCombo");
-        var left = this.FindControl<ContentControl>("LeftHost");
-        var treeCanvas = this.FindControl<Canvas>("TreeCanvas");
-        var treeCanvasHost = this.FindControl<Avalonia.Controls.Border>("TreeCanvasHost");
-        var toggleBrowseMenuItem = this.FindControl<MenuItem>("ToggleBrowseMenuItem");
 
         // Load user settings (MRU paths, cloud handling preference)
-        var settings = UserSettings.Load();
+        _userSettings = TreeMap.UserSettings.Load();
 
         // Populate path combo with MRU paths
-        foreach (var mruPath in settings.MruPaths)
+        foreach (var mruPath in _userSettings.MruPaths)
         {
-            pathCombo.Items.Add(mruPath);
+            this.PathCombo.Items.Add(mruPath);
         }
         // Select the first item if available
-        if (pathCombo.Items.Count > 0)
+        if (PathCombo.Items.Count > 0)
         {
-            pathCombo.SelectedIndex = 0;
+            this.PathCombo.SelectedIndex = 0;
         }
 
         // Set cloud handling from saved setting
-        if (cloudHandlingCombo != null && settings.CloudHandlingIndex >= 0 && settings.CloudHandlingIndex < 3)
+        if (CloudHandlingCombo != null && _userSettings.CloudHandlingIndex >= 0 && _userSettings.CloudHandlingIndex < 3)
         {
-            cloudHandlingCombo.SelectedIndex = settings.CloudHandlingIndex;
+            CloudHandlingCombo.SelectedIndex = _userSettings.CloudHandlingIndex;
         }
 
-        // Helper to get current path from editable combo
-        Func<string> getPath = () =>
-        {
-            // For editable ComboBox, the text is in the SelectedItem or we need to get it differently
-            var text = pathCombo?.SelectedItem?.ToString();
-            if (string.IsNullOrEmpty(text))
-            {
-                // Try to get from the text input part of editable combo
-                var textBox = pathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
-                text = textBox?.Text;
-            }
-            return text ?? System.IO.Directory.GetCurrentDirectory();
-        };
+        _isRefreshingCombo = false;
+        // BrowseControl and last scan stored on instance fields
+        _browse = null;
+        _lastScanResult = null;
 
-        // Helper to set path in combo
-        System.Action<string> setPath = (path) =>
-        {
-            var textBox = pathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
-            if (textBox != null)
-            {
-                textBox.Text = path;
-            }
-        };
-
-        // Helper to add path to MRU and refresh combo (without triggering SelectionChanged)
-        bool isRefreshingCombo = false;
-        System.Action<string> addToMru = (path) =>
-        {
-            // Prevent reentrant calls during combo refresh
-            if (isRefreshingCombo)
-                return;
-
-            settings.AddMruPath(path);
-            settings.CloudHandlingIndex = cloudHandlingCombo?.SelectedIndex ?? 0;
-            settings.Save();
-
-            // Refresh combo items without triggering another scan
-            isRefreshingCombo = true;
-            pathCombo.SelectedIndex = -1;  // Reset selection before clearing to avoid index issues
-            pathCombo.Items.Clear();
-            foreach (var mruPath in settings.MruPaths)
-            {
-                pathCombo.Items.Add(mruPath);
-            }
-            // Select the first item (the one we just added/moved to front)
-            if (pathCombo.Items.Count > 0)
-            {
-                pathCombo.SelectedIndex = 0;
-            }
-            // Also update the text box directly to ensure it shows the path
-            setPath(path);
-            isRefreshingCombo = false;
-        };
-
-        // BrowseControl created lazily when user requests it via button or context menu
-        BrowseControl? browse = null;
-        // Store the scan results for creating browse control later
-        ScanResult? lastScanResult = null;
-
-        // Helper to get selected cloud handling mode from combo box
-        Func<CloudFileHandling> getCloudHandling = () =>
-        {
-            return cloudHandlingCombo?.SelectedIndex switch
-            {
-                1 => CloudFileHandling.ExcludeFromSize,
-                2 => CloudFileHandling.IncludePlaceholderSize,
-                _ => CloudFileHandling.IncludeLogicalSize
-            };
-        };
 
         // Helper to redraw the treemap using existing scan data (without rescanning)
-        System.Action? redrawTreemap = null;
+        //System.Action? redrawTreemap = () => RedrawTreemap(TreeCanvas, TreeCanvasHost, CloudHandlingCombo);
 
         // Wire up cloud handling combo - recalculate sizes without rescanning
-        if (cloudHandlingCombo != null)
+        if (CloudHandlingCombo != null)
         {
-            cloudHandlingCombo.SelectionChanged += (s, args) =>
+            CloudHandlingCombo.SelectionChanged += (s, args) =>
             {
-                if (lastScanResult != null && lastScanResult.Data.Count > 0)
+                if (_lastScanResult != null && _lastScanResult.Data.Count > 0)
                 {
-                    // Recalculate sizes based on new cloud handling option (no rescan needed!)
-                    var cloudHandling = getCloudHandling();
-                    DiskScanner.RecalculateSizes(lastScanResult, cloudHandling);
-
-                    // Save the preference
-                    settings.CloudHandlingIndex = cloudHandlingCombo.SelectedIndex;
-                    settings.Save();
-
-                    // Invalidate cached browse control since sizes changed
-                    browse = null;
-
-                    // Redraw the treemap with updated sizes
-                    redrawTreemap?.Invoke();
+                    var cloudHandling = GetCloudHandling(CloudHandlingCombo);
+                    DiskScanner.RecalculateSizes(_lastScanResult, cloudHandling);
+                    _userSettings.CloudHandlingIndex = CloudHandlingCombo.SelectedIndex;
+                    _userSettings.Save();
+                    _browse = null;
+                    this.RedrawTreemap();
+                    //RedrawTreemap(TreeCanvas, TreeCanvasHost, CloudHandlingCombo);
                 }
             };
         }
@@ -155,10 +77,10 @@ public partial class MainWindow : Window
         // Helper to toggle between treemap and file list views
         System.Action toggleView = () =>
         {
-            bool showFileList = !left.IsVisible;
+            bool showFileList = !LeftHost.IsVisible;
 
             // Create BrowseControl on first show, using last scan results
-            if (showFileList && browse == null && lastScanResult != null)
+            if (showFileList && _browse == null && _lastScanResult != null)
             {
                 //var items = new System.Collections.Generic.List<object>();
                 //foreach (var kv in lastScanResult.Data)
@@ -184,10 +106,10 @@ Implementation notes (from the code)
 •	ExcludeFromSize -> Size=100MB, Diff=0
 •	Includ                 */
                 // Use the recorded scan root if available to save horizontal space; otherwise fall back to inferring
-                var rootPrefix = lastScanResult.RootPath ?? string.Empty;
+                var rootPrefix = _lastScanResult.RootPath ?? string.Empty;
                 var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
 
-                var items = from kv in lastScanResult.Data
+                var items = from kv in _lastScanResult.Data
                             select new
                             {
                                 // Remove the root prefix to save horizontal space in the list
@@ -200,32 +122,32 @@ Implementation notes (from the code)
                                 kv.Value.IsCloudOnly,
                                 kv.Value.Depth,
                             };
-                browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
-                left.Content = browse;
+                _browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
+                LeftHost.Content = _browse;
             }
 
-            left.IsVisible = showFileList;
-            treeCanvasHost.IsVisible = !showFileList;
+            LeftHost.IsVisible = showFileList;
+            TreeCanvasHost.IsVisible = !showFileList;
 
             // Update button and menu text
             var newText = showFileList ? "Show Treemap" : "Show File List";
-            if (toggleViewBtn != null) toggleViewBtn.Content = newText;
-            if (toggleBrowseMenuItem != null) toggleBrowseMenuItem.Header = newText;
+            if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
+            if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
             // Update the file list context menu too
             var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
             if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
         };
 
         // Wire up toggle button
-        if (toggleViewBtn != null)
+        if (ToggleViewBtn != null)
         {
-            toggleViewBtn.Click += (s, args) => toggleView();
+            ToggleViewBtn.Click += (s, args) => toggleView();
         }
 
         // Wire up context menu items (both treemap and file list)
-        if (toggleBrowseMenuItem != null)
+        if (ToggleBrowseMenuItem != null)
         {
-            toggleBrowseMenuItem.Click += (s, args) => toggleView();
+            ToggleBrowseMenuItem.Click += (s, args) => toggleView();
         }
         var toggleTreemapMenuItemInit = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
         if (toggleTreemapMenuItemInit != null)
@@ -241,7 +163,7 @@ Implementation notes (from the code)
             {
                 if (TreemapPort.CurrentDict != null && TreemapPort.CurrentRootPath != null)
                 {
-                    treeCanvas.Children.Clear();
+                    TreeCanvas.Children.Clear();
                     var rootKey = TreemapPort.CurrentRootPath;
                     long total = TreemapPort.CurrentDict.ContainsKey(rootKey) ? TreemapPort.CurrentDict[rootKey].Size : 0;
                     // If total is still 0, sum up child sizes (same fallback as main scan)
@@ -250,9 +172,9 @@ Implementation notes (from the code)
                         foreach (var v in TreemapPort.CurrentDict.Values)
                             total += v.Size;
                     }
-                    var rect = new Rect(0, 0, treeCanvas.Width, treeCanvas.Height);
+                    var rect = new Rect(0, 0, TreeCanvas.Width, TreeCanvas.Height);
                     // Swap orientation with progress window
-                    await TreemapPort.MakeTreemapAsync(TreemapPort.CurrentDict, treeCanvas, rootKey, rect, total, !TreemapPort.CurrentHorizontal);
+                    await TreemapPort.MakeTreemapAsync(TreemapPort.CurrentDict, TreeCanvas, rootKey, rect, total, !TreemapPort.CurrentHorizontal);
                 }
             };
         }
@@ -331,18 +253,19 @@ Implementation notes (from the code)
         // Use the Border (TreeCanvasHost) to detect valid bounds since Canvas doesn't stretch
         bool initialScanDone = false;
         System.Action<string>? runScan = null;
-        treeCanvasHost.LayoutUpdated += (s, ev) =>
+        TreeCanvasHost.LayoutUpdated += (s, ev) =>
         {
             try
             {
-                if (!initialScanDone && treeCanvasHost.Bounds.Width > 0 && treeCanvasHost.Bounds.Height > 0)
+                if (!initialScanDone && TreeCanvasHost.Bounds.Width > 0 && TreeCanvasHost.Bounds.Height > 0)
                 {
                     initialScanDone = true;
-                    var initialPath = settings.MruPaths.Count > 0
-                        ? settings.MruPaths[0]
+                    var initialPath = _userSettings.MruPaths.Count > 0
+                        ? _userSettings.MruPaths[0]
                         : System.IO.Directory.GetCurrentDirectory();
-                    setPath(initialPath);
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initialPath), Avalonia.Threading.DispatcherPriority.Background);
+                    SetPath(this.PathCombo, initialPath);
+                    //Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initialPath), Avalonia.Threading.DispatcherPriority.Background);
+                    runScan?.Invoke(initialPath);
                 }
             }
             catch { }
@@ -352,16 +275,15 @@ Implementation notes (from the code)
         runScan = (path) =>
         {
             // Add to MRU before scanning
-            addToMru(path);
-
+            AddToMruList(path, _userSettings, CloudHandlingCombo, this.PathCombo);
             // Switch to treemap view if currently showing file list (file list becomes stale with new scan)
-            if (left.IsVisible)
+            if (LeftHost.IsVisible)
             {
-                left.IsVisible = false;
-                treeCanvasHost.IsVisible = true;
+                LeftHost.IsVisible = false;
+                TreeCanvasHost.IsVisible = true;
                 var newText = "Show File List";
-                if (toggleViewBtn != null) toggleViewBtn.Content = newText;
-                if (toggleBrowseMenuItem != null) toggleBrowseMenuItem.Header = newText;
+                if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
+                if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
                 var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
                 if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
             }
@@ -370,85 +292,37 @@ Implementation notes (from the code)
             var cts = new System.Threading.CancellationTokenSource();
 
             // Get the selected cloud handling mode
-            var cloudHandling = getCloudHandling();
+            var cloudHandling = GetCloudHandling(CloudHandlingCombo);
 
             // Run the combined scan + render operation
-            _ = RunScanAndRenderAsync(path, cloudHandling, cts, treeCanvas, treeCanvasHost, this,
+            _ = RunScanAndRenderAsync(path, cloudHandling, cts, TreeCanvas, TreeCanvasHost, this,
                 result =>
                 {
-                    lastScanResult = result;
-                    browse = null;
+                    _lastScanResult = result;
+                    _browse = null;
+                    try
+                    {
+                        // Ensure the UI shows the path that was scanned
+                        SetPath(this.PathCombo, path);
+                    }
+                    catch { }
                 });
         };
 
         // Define redrawTreemap - redraws treemap without rescanning (for cloud handling changes)
-        redrawTreemap = () =>
-        {
-            if (lastScanResult == null || lastScanResult.Data.Count == 0)
-                return;
-
-            var dict = lastScanResult.Data;
-            treeCanvas.Children.Clear();
-
-            // Use the recorded scan root if available; otherwise fall back to inferring the root key
-            string? rootKey = lastScanResult?.RootPath;
-            if (rootKey == null)
-            {
-                foreach (var k in dict.Keys)
-                {
-                    if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
-                    {
-                        if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
-                    }
-                }
-            }
-            if (rootKey == null)
-                return;
-
-            long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
-            if (total == 0)
-            {
-                foreach (var v in dict.Values) total += v.Size;
-            }
-
-            var availW = treeCanvasHost.Bounds.Width;
-            var availH = treeCanvasHost.Bounds.Height;
-            if (availW <= 0) availW = this.Bounds.Width - 360;
-            if (availH <= 0) availH = this.Bounds.Height - 120;
-            var rect = new Rect(0, 0, availW > 0 ? availW : 800, availH > 0 ? availH : 600);
-            treeCanvas.Width = rect.Width;
-            treeCanvas.Height = rect.Height;
-
-            // Redraw synchronously (data is already in memory)
-            TreemapPort.MakeTreemap(dict, treeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
-
-            // Update status text with summary
-            var statusText = this.FindControl<TextBlock>("StatusText");
-            if (statusText != null)
-            {
-                var cloudHandling = getCloudHandling();
-                var modeStr = cloudHandling switch
-                {
-                    CloudFileHandling.ExcludeFromSize => "Cloud: Excluded",
-                    CloudFileHandling.IncludePlaceholderSize => "Cloud: Placeholder",
-                    _ => "Cloud: Logical Size"
-                };
-                statusText.Text = $"Items: {dict.Count:n0}, {modeStr}";
-            }
-        };
 
         // Wire scan button to run the common runScan helper
-        scan.Click += (_, __) =>
+        this.ScanBtn.Click += (_, __) =>
         {
-            var path = getPath();
+            var path = GetPath(this.PathCombo);
             runScan(path);
         };
 
         // Wire up path combo selection changed - scan when user selects from MRU dropdown
-        pathCombo.SelectionChanged += (s, args) =>
+        this.PathCombo.SelectionChanged += (s, args) =>
         {
             // Skip if we're just refreshing the combo programmatically
-            if (isRefreshingCombo)
+            if (_isRefreshingCombo)
                 return;
 
             if (args.AddedItems.Count > 0 && args.AddedItems[0] is string selectedPath)
@@ -462,11 +336,11 @@ Implementation notes (from the code)
         };
 
         // Allow user to press Enter in the combo box to scan (for manually typed paths)
-        pathCombo.KeyDown += (s, e) =>
+        this.PathCombo.KeyDown += (s, e) =>
         {
             if (e.Key == Avalonia.Input.Key.Enter)
             {
-                var path = getPath();
+                var path = GetPath(this.PathCombo);
                 if (!string.IsNullOrEmpty(path) && runScan != null)
                 {
                     runScan(path);
@@ -476,9 +350,9 @@ Implementation notes (from the code)
         };
 
         // Folder picker using Avalonia's OpenFolderDialog
-        if (browseBtn != null)
+        if (BrowseBtn != null)
         {
-            browseBtn.Click += async (_, __) =>
+            BrowseBtn.Click += async (_, __) =>
             {
                 try
                 {
@@ -486,7 +360,7 @@ Implementation notes (from the code)
                     var result = await dlg.ShowAsync(this);
                     if (!string.IsNullOrEmpty(result))
                     {
-                        setPath(result);
+                        SetPath(this.PathCombo, result);
                         // run an immediate scan when a folder is chosen
                         runScan(result);
                     }
@@ -501,10 +375,10 @@ Implementation notes (from the code)
         // Trigger an automatic initial scan of current directory after layout settles
         this.AttachedToVisualTree += (s, e) =>
         {
-            var initialPath = settings.MruPaths.Count > 0
-                ? settings.MruPaths[0]
+            var initialPath = _userSettings.MruPaths.Count > 0
+                ? _userSettings.MruPaths[0]
                 : System.IO.Directory.GetCurrentDirectory();
-            setPath(initialPath);
+            SetPath(this.PathCombo, initialPath);
             // schedule scan after layout so canvas has real bounds
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
@@ -514,10 +388,169 @@ Implementation notes (from the code)
 
         // Also schedule an initial scan immediately after OnOpened to ensure we run
         // when AttachedToVisualTree did not fire early enough.
-        var initPathNow = settings.MruPaths.Count > 0
-            ? settings.MruPaths[0]
+        var initPathNow = _userSettings.MruPaths.Count > 0
+            ? _userSettings.MruPaths[0]
             : System.IO.Directory.GetCurrentDirectory();
         Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void RedrawTreemap()
+    {
+        if (_lastScanResult == null || _lastScanResult.Data.Count == 0)
+            return;
+
+        var dict = _lastScanResult.Data;
+        TreeCanvas.Children.Clear();
+
+        // Use the recorded scan root if available; otherwise fall back to inferring the root key
+        string? rootKey = _lastScanResult?.RootPath;
+        if (rootKey == null)
+        {
+            foreach (var k in dict.Keys)
+            {
+                if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                {
+                    if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                }
+            }
+        }
+        if (rootKey == null)
+            return;
+
+        long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
+        if (total == 0)
+        {
+            foreach (var v in dict.Values) total += v.Size;
+        }
+
+        var availW = TreeCanvasHost.Bounds.Width;
+        var availH = TreeCanvasHost.Bounds.Height;
+        if (availW <= 0) availW = this.Bounds.Width - 360;
+        if (availH <= 0) availH = this.Bounds.Height - 120;
+        var rect = new Rect(0, 0, availW > 0 ? availW : 800, availH > 0 ? availH : 600);
+        TreeCanvas.Width = rect.Width;
+        TreeCanvas.Height = rect.Height;
+
+        // Redraw synchronously (data is already in memory)
+        TreemapPort.MakeTreemap(dict, TreeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
+
+        // Update status text with summary
+        var statusText = this.FindControl<TextBlock>("StatusText");
+        if (statusText != null)
+        {
+            var cloudHandling = GetCloudHandling(CloudHandlingCombo);
+            var modeStr = cloudHandling switch
+            {
+                CloudFileHandling.ExcludeFromSize => "Cloud: Excluded",
+                CloudFileHandling.IncludePlaceholderSize => "Cloud: Placeholder",
+                _ => "Cloud: Logical Size"
+            };
+            statusText.Text = $"Items: {dict.Count:n0}, {modeStr}";
+        }
+
+    }
+
+    // Extracted focused helpers used by InitializeAfterOpened
+    private string GetPath(ComboBox pathCombo)
+    {
+        var text = pathCombo?.SelectedItem?.ToString();
+        if (string.IsNullOrEmpty(text))
+        {
+            var textBox = pathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
+            text = textBox?.Text;
+        }
+        return text ?? System.IO.Directory.GetCurrentDirectory();
+    }
+
+    private void SetPath(ComboBox pathCombo, string path)
+    {
+        var textBox = pathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
+        if (textBox != null)
+        {
+            textBox.Text = path;
+        }
+    }
+
+    private void AddToMruList(string path, UserSettings settings, ComboBox? cloudHandlingCombo, ComboBox pathCombo)
+    {
+        if (_isRefreshingCombo)
+            return;
+
+        settings.AddMruPath(path);
+        settings.CloudHandlingIndex = cloudHandlingCombo?.SelectedIndex ?? 0;
+        settings.Save();
+
+        _isRefreshingCombo = true;
+        pathCombo.SelectedIndex = -1;
+        pathCombo.Items.Clear();
+        foreach (var mruPath in settings.MruPaths)
+            pathCombo.Items.Add(mruPath);
+        if (pathCombo.Items.Count > 0)
+            pathCombo.SelectedIndex = 0;
+        SetPath(pathCombo, path);
+        _isRefreshingCombo = false;
+    }
+
+    private CloudFileHandling GetCloudHandling(ComboBox? cloudHandlingCombo)
+    {
+        return cloudHandlingCombo?.SelectedIndex switch
+        {
+            1 => CloudFileHandling.ExcludeFromSize,
+            2 => CloudFileHandling.IncludePlaceholderSize,
+            _ => CloudFileHandling.IncludeLogicalSize
+        };
+    }
+
+    private void RedrawTreemap(Canvas treeCanvas, Border treeCanvasHost, ComboBox? cloudHandlingCombo)
+    {
+        if (_lastScanResult == null || _lastScanResult.Data.Count == 0)
+            return;
+
+        var dict = _lastScanResult.Data;
+        treeCanvas.Children.Clear();
+
+        string? rootKey = _lastScanResult?.RootPath;
+        if (rootKey == null)
+        {
+            foreach (var k in dict.Keys)
+            {
+                if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
+                {
+                    if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
+                }
+            }
+        }
+        if (rootKey == null)
+            return;
+
+        long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
+        if (total == 0)
+        {
+            foreach (var v in dict.Values) total += v.Size;
+        }
+
+        var availW = treeCanvasHost.Bounds.Width;
+        var availH = treeCanvasHost.Bounds.Height;
+        if (availW <= 0) availW = this.Bounds.Width - 360;
+        if (availH <= 0) availH = this.Bounds.Height - 120;
+        var rect = new Rect(0, 0, availW > 0 ? availW : 800, availH > 0 ? availH : 600);
+        treeCanvas.Width = rect.Width;
+        treeCanvas.Height = rect.Height;
+
+        TreemapPort.MakeTreemap(dict, treeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
+
+        var statusText = this.FindControl<TextBlock>("StatusText");
+        if (statusText != null)
+        {
+            var cloudHandling = GetCloudHandling(cloudHandlingCombo);
+            var modeStr = cloudHandling switch
+            {
+                CloudFileHandling.ExcludeFromSize => "Cloud: Excluded",
+                CloudFileHandling.IncludePlaceholderSize => "Cloud: Placeholder",
+                _ => "Cloud: Logical Size"
+            };
+            statusText.Text = $"Items: {dict.Count:n0}, {modeStr}";
+        }
     }
 
     /// <summary>
@@ -537,7 +570,6 @@ Implementation notes (from the code)
         using var progressWindow = new ProgressWindow($"TreeMap - Scanning: {path}", cts);
         await progressWindow.ShowAsync();
 
-        var statusText = this.FindControl<TextBlock>("StatusText");
         string summary = "";
 
         try
@@ -549,7 +581,7 @@ Implementation notes (from the code)
 
             if (cts.IsCancellationRequested)
             {
-                statusText.Text = "Scan cancelled";
+                StatusText.Text = "Scan cancelled";
                 return;
             }
 
@@ -586,7 +618,7 @@ Implementation notes (from the code)
 
             if (dict.Count == 0)
             {
-                statusText.Text = "No items found";
+                StatusText.Text = "No items found";
                 return;
             }
 
@@ -628,15 +660,15 @@ Implementation notes (from the code)
             // Render with progress (pass existing progress window)
             await TreemapPort.MakeTreemapAsync(dict, treeCanvas, rootKey, rect, total, true, cts, progressWindow);
 
-            statusText.Text = summary;
+            StatusText.Text = summary;
         }
         catch (OperationCanceledException)
         {
-            statusText.Text = "Operation cancelled";
+            StatusText.Text = "Operation cancelled";
         }
         catch (Exception ex)
         {
-            statusText.Text = $"Error: {ex.Message}";
+            StatusText.Text = $"Error: {ex.Message}";
             System.Diagnostics.Debug.WriteLine($"RunScanAndRenderAsync error: {ex}");
         }
     }
