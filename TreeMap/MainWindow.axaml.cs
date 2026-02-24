@@ -76,6 +76,10 @@ public partial class MainWindow : Window
         {
             this.ShowBrowseList();
         };
+        this.ShowErrorsBtn.Click += (o, e) =>
+        {
+            this.ShowErrors();
+        };
         // Wire up swap orientation menu item
         var swapOrientationMenuItem = this.FindControl<MenuItem>("SwapOrientationMenuItem");
         if (swapOrientationMenuItem != null)
@@ -129,6 +133,7 @@ public partial class MainWindow : Window
                         System.Diagnostics.Debug.WriteLine($"Failed to open explorer: {ex.Message}");
                     }
                 }
+
             };
         }
 
@@ -301,6 +306,43 @@ public partial class MainWindow : Window
         //    ? _userSettings.MruPaths[0]
         //    : System.IO.Directory.GetCurrentDirectory();
         //Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    void ShowErrors()
+    {
+        try
+        {
+            if (_lastScanResult == null || !_lastScanResult.HasErrors)
+            {
+                if (StatusText != null)
+                    StatusText.Text = "No scan errors";
+                return;
+            }
+
+            var items = from err in _lastScanResult.Errors
+                        orderby err.Path
+                        select new
+                        {
+                            Path = err.Path,
+                            Message = err.Message,
+                            Exception = err.ExceptionType
+                        };
+
+            var browse = new BrowseControl(items, new[] { 500, 400, 150 }, true);
+            var errWindow = new Window()
+            {
+                WindowState = WindowState.Maximized,
+                ShowInTaskbar = false,
+                Title = $"Scan Errors - {_lastScanResult.RootPath}"
+            };
+            errWindow.Content = browse;
+            errWindow.Show(this);
+        }
+        catch (System.Exception ex)
+        {
+            if (StatusText != null)
+                StatusText.Text = ex.Message;
+        }
     }
 
     void ShowBrowseList()
