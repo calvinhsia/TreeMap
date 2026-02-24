@@ -218,6 +218,7 @@ public static class TreemapPort
     {
         // Track root path for relative display
         rootPath ??= parentPath;
+        var rootPathLength = rootPath.Length - 1;
 
         if (cts.IsCancellationRequested) return;
 
@@ -304,8 +305,8 @@ public static class TreemapPort
             if (r.Width > 20 && r.Height > 14)
             {
                 var txt = new TextBlock
-                { 
-                    Text = key,
+                {
+                    Text = key.Substring(rootPathLength),
                     Foreground = Brushes.Black,
                     TextTrimming = TextTrimming.CharacterEllipsis
                 };
@@ -343,7 +344,7 @@ public static class TreemapPort
             // O(1) check instead of O(n) Any() query!
             if (lookup.HasChildren(key) && (r.Width > 40 && r.Height > 20))
             {
-                await CollectTreemapElementsAsync(dict, lookup, canvas, key, r, dict[key].Size, !horizontal, elements, 
+                await CollectTreemapElementsAsync(dict, lookup, canvas, key, r, dict[key].Size, !horizontal, elements,
                     processedItems, totalItems, progressWindow, cts, rootPath);
             }
         }
@@ -458,13 +459,13 @@ public static class TreemapPort
             if (r.Width > 20 && r.Height > 14)
             {
                 var txt = new TextBlock
-                { 
+                {
                     Text = key, // Full path
                     Foreground = Brushes.Black,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
                 };
                 txt.DataContext = key;
-                
+
                 // Rotate text 90 degrees for tall narrow rectangles (height > width)
                 if (r.Height > r.Width * 1.5 && r.Height > 60)
                 {

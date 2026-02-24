@@ -386,6 +386,7 @@ Implementation notes (from the code)
             var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
 
             var items = from kv in _lastScanResult.Data
+                        orderby kv.Value.Size descending
                         select new
                         {
                             // Remove the root prefix to save horizontal space in the list
@@ -402,7 +403,8 @@ Implementation notes (from the code)
             var fileListWIndow = new Window()
             {
                 WindowState = WindowState.Maximized,
-                ShowInTaskbar = false
+                ShowInTaskbar = false,
+                Title = $"TreeMap {_lastScanResult.RootPath}"
             };
             fileListWIndow.Content = browse;
             fileListWIndow.Show(this);
