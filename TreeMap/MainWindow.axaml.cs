@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using System;
 using System.Collections.Generic;
@@ -17,6 +18,7 @@ public partial class MainWindow : Window
     private ScanResult? _lastScanResult;
     private bool _isRefreshingCombo;
     private UserSettings? _userSettings;
+    private string? _initialPathToUse;
 
     public MainWindow()
     {
@@ -29,7 +31,10 @@ public partial class MainWindow : Window
 
         // Load user settings (MRU paths, cloud handling preference)
         _userSettings = TreeMap.UserSettings.Load();
-
+        if (!string.IsNullOrEmpty(_initialPathToUse))
+        {
+            this.PathCombo.Items.Add(_initialPathToUse); // will not be added to MRU list since it's just an initial path for a drill-in window
+        }
         // Populate path combo with MRU paths
         foreach (var mruPath in _userSettings.MruPaths)
         {
@@ -51,10 +56,6 @@ public partial class MainWindow : Window
         // BrowseControl and last scan stored on instance fields
         _lastScanResult = null;
 
-
-        // Helper to redraw the treemap using existing scan data (without rescanning)
-        //System.Action? redrawTreemap = () => RedrawTreemap(TreeCanvas, TreeCanvasHost, CloudHandlingCombo);
-
         // Wire up cloud handling combo - recalculate sizes without rescanning
         if (CloudHandlingCombo != null)
         {
@@ -75,83 +76,6 @@ public partial class MainWindow : Window
         {
             this.ShowBrowseList();
         };
-
-        //        // Helper to toggle between treemap and file list views
-        //        System.Action toggleView = () =>
-        //        {
-        //            bool showFileList = !LeftHost.IsVisible;
-
-        //            // Create BrowseControl on first show, using last scan results
-        //            if (showFileList && _browse == null && _lastScanResult != null)
-        //            {
-        //                //var items = new System.Collections.Generic.List<object>();
-        //                //foreach (var kv in lastScanResult.Data)
-        //                //    items.Add(new { 
-        //                //        Path = kv.Key, 
-        //                //        Size = kv.Value.Size,
-        //                //        Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
-        //                //        CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : ""
-        //                //    });
-        //                /*
-        //•	LocalSize = bytes actually stored locally on disk (sum of file lengths for files that are present locally).
-        //•	CloudLogicalSize = bytes that cloud-only files would take if downloaded (logical size reported by metadata/reparse point).
-        //•	Size = the displayed/used size after applying the chosen cloud-handling policy:
-        //•	IncludeLogicalSize (default): Size = LocalSize + CloudLogicalSize
-        //•	ExcludeFromSize: Size = LocalSize
-        //•	IncludePlaceholderSize: Size = LocalSize + (~1 KB per cloud file) (DiskScanner uses a 1024 byte placeholder estimate)
-        //Implementation notes (from the code)
-        //•	DiskScanner.ScanInternal tracks LocalSize and CloudLogicalSize separately and stores them on each MapDataItem.
-        //•	DiskScanner.CalculateSize(localSize, cloudLogicalSize, cloudFileCount, cloudHandling) computes Size according to the policy.
-        //•	DiskScanner.RecalculateSizes(result, cloudHandling) recomputes each MapDataItem.Size from LocalSize and CloudLogicalSize without rescanning.
-        //•	Diff (what you added) = Size - LocalSize shows the extra bytes coming from cloud logical size or placeholder estimates. Example: if LocalSize=100MB, CloudLogicalSize=900MB:
-        //•	IncludeLogicalSize -> Size=100+900=1000MB, Diff=900MB
-        //•	ExcludeFromSize -> Size=100MB, Diff=0
-        //•	Includ                 */
-        //                // Use the recorded scan root if available to save horizontal space; otherwise fall back to inferring
-        //                var rootPrefix = _lastScanResult.RootPath ?? string.Empty;
-        //                var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
-
-        //                var items = from kv in _lastScanResult.Data
-        //                            select new
-        //                            {
-        //                                // Remove the root prefix to save horizontal space in the list
-        //                                Path = kv.Key.Substring(rootLength),
-        //                                Size = kv.Value.Size,
-        //                                LocalSize = kv.Value.LocalSize,
-        //                                kv.Value.CloudLogicalSize,
-        //                                Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
-        //                                CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : "",
-        //                                kv.Value.IsCloudOnly,
-        //                                kv.Value.Depth,
-        //                            };
-        //                _browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
-        //                LeftHost.Content = _browse;
-        //            }
-
-        //            LeftHost.IsVisible = showFileList;
-        //            TreeCanvasHost.IsVisible = !showFileList;
-
-        //            // Update button and menu text
-        //            var newText = showFileList ? "Show Treemap" : "Show File List";
-        //            if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
-        //            if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
-        //            // Update the file list context menu too
-        //            var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
-        //            if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
-        //        };
-
-
-        //// Wire up context menu items (both treemap and file list)
-        //if (ToggleBrowseMenuItem != null)
-        //{
-        //    ToggleBrowseMenuItem.Click += (s, args) => toggleView();
-        //}
-        //var toggleTreemapMenuItemInit = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
-        //if (toggleTreemapMenuItemInit != null)
-        //{
-        //    toggleTreemapMenuItemInit.Click += (s, args) => toggleView();
-        //}
-
         // Wire up swap orientation menu item
         var swapOrientationMenuItem = this.FindControl<MenuItem>("SwapOrientationMenuItem");
         if (swapOrientationMenuItem != null)
@@ -223,26 +147,29 @@ public partial class MainWindow : Window
                         cleanPath = cleanPath.TrimEnd('*').TrimEnd(TreeMapConstants.PathSep);
 
                     // Create and show a new window
-                    var newWindow = new MainWindow();
-                    newWindow.Show();
-
-                    // The new window will auto-scan its initial path, but we want it to scan cleanPath
-                    // We can set this via a property or by posting to the dispatcher after it opens
-                    newWindow.Opened += (ws, we) =>
+                    var newWindow = new MainWindow()
                     {
-                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-                        {
-                            var newPathCombo = newWindow.FindControl<ComboBox>("PathCombo");
-                            var newTextBox = newPathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
-                            if (newTextBox != null)
-                            {
-                                newTextBox.Text = cleanPath;
-                            }
-                            // Trigger scan by clicking the scan button
-                            var newScanBtn = newWindow.FindControl<Button>("ScanBtn");
-                            newScanBtn?.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-                        }, Avalonia.Threading.DispatcherPriority.Background);
+                        _initialPathToUse = cleanPath,
                     };
+
+                    //// The new window will auto-scan its initial path, but we want it to scan cleanPath
+                    //// We can set this via a property or by posting to the dispatcher after it opens
+                    //newWindow.Opened += (ws, we) =>
+                    //{
+                    //    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    //    {
+                    //        var newPathCombo = newWindow.FindControl<ComboBox>("PathCombo");
+                    //        var newTextBox = newPathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
+                    //        if (newTextBox != null)
+                    //        {
+                    //            newTextBox.Text = cleanPath;
+                    //        }
+                    //        // Trigger scan by clicking the scan button
+                    //        var newScanBtn = newWindow.FindControl<Button>("ScanBtn");
+                    //        newScanBtn?.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+                    //    }, Avalonia.Threading.DispatcherPriority.Background);
+                    //};
+                    newWindow.Show();
                 }
             };
         }
@@ -260,6 +187,10 @@ public partial class MainWindow : Window
                     var initialPath = _userSettings.MruPaths.Count > 0
                         ? _userSettings.MruPaths[0]
                         : System.IO.Directory.GetCurrentDirectory();
+                    if (!string.IsNullOrEmpty(_initialPathToUse))
+                    {
+                        initialPath = _initialPathToUse;
+                    }
                     SetPath(this.PathCombo, initialPath);
                     //Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initialPath), Avalonia.Threading.DispatcherPriority.Background);
                     runScan(initialPath);
@@ -320,14 +251,28 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    var dlg = new OpenFolderDialog();
-                    var result = await dlg.ShowAsync(this);
-                    if (!string.IsNullOrEmpty(result))
+                    //var topLevel = TopLevel.GetTopLevel(this);
+                    var folderResult = await this.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
                     {
-                        SetPath(this.PathCombo, result);
-                        // run an immediate scan when a folder is chosen
-                        runScan(result);
-                    }
+                        AllowMultiple = false,
+                        Title = "Select a folder to scan"
+                    });
+                    if (folderResult != null)
+                    {
+                        var fldr = folderResult[0].TryGetLocalPath();
+                        if (!string.IsNullOrEmpty(fldr))
+                        {
+                            SetPath(this.PathCombo, fldr);
+                            runScan(fldr);
+                        }                  }
+                    //var dlg = new OpenFolderDialog();
+                    //var result = await dlg.ShowAsync(this);
+                    //if (!string.IsNullOrEmpty(result))
+                    //{
+                    //    SetPath(this.PathCombo, result);
+                    //    // run an immediate scan when a folder is chosen
+                    //    runScan(result);
+                    //}
                 }
                 catch (System.Exception ex)
                 {
@@ -336,26 +281,26 @@ public partial class MainWindow : Window
             };
         }
 
-        // Trigger an automatic initial scan of current directory after layout settles
-        this.AttachedToVisualTree += (s, e) =>
-        {
-            var initialPath = _userSettings.MruPaths.Count > 0
-                ? _userSettings.MruPaths[0]
-                : System.IO.Directory.GetCurrentDirectory();
-            SetPath(this.PathCombo, initialPath);
-            // schedule scan after layout so canvas has real bounds
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                runScan(initialPath);
-            }, Avalonia.Threading.DispatcherPriority.Background);
-        };
+        //// Trigger an automatic initial scan of current directory after layout settles
+        //this.AttachedToVisualTree += (s, e) =>
+        //{
+        //    var initialPath = _userSettings.MruPaths.Count > 0
+        //        ? _userSettings.MruPaths[0]
+        //        : System.IO.Directory.GetCurrentDirectory();
+        //    SetPath(this.PathCombo, initialPath);
+        //    // schedule scan after layout so canvas has real bounds
+        //    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        //    {
+        //        runScan(initialPath);
+        //    }, Avalonia.Threading.DispatcherPriority.Background);
+        //};
 
-        // Also schedule an initial scan immediately after OnOpened to ensure we run
-        // when AttachedToVisualTree did not fire early enough.
-        var initPathNow = _userSettings.MruPaths.Count > 0
-            ? _userSettings.MruPaths[0]
-            : System.IO.Directory.GetCurrentDirectory();
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
+        //// Also schedule an initial scan immediately after OnOpened to ensure we run
+        //// when AttachedToVisualTree did not fire early enough.
+        //var initPathNow = _userSettings.MruPaths.Count > 0
+        //    ? _userSettings.MruPaths[0]
+        //    : System.IO.Directory.GetCurrentDirectory();
+        //Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan(initPathNow), Avalonia.Threading.DispatcherPriority.Background);
     }
 
     void ShowBrowseList()
@@ -550,7 +495,10 @@ Implementation notes (from the code)
     {
         if (_isRefreshingCombo || _userSettings == null)
             return;
-
+        if (_initialPathToUse == path)
+        {
+            return;// don't add to MRU if it's a drill into subfolder window
+        }
         _userSettings.AddMruPath(path);
         _userSettings.CloudHandlingIndex = cloudHandlingCombo?.SelectedIndex ?? 0;
         _userSettings.Save();
