@@ -10,11 +10,14 @@ namespace TreeMap
 {
     /// <summary>
     /// Result of a disk scan operation, including data and any errors encountered.
+    /// Contains instance methods to populate and recalculate sizes so a ScanResult
+    /// can perform the scan operation itself.
+    /// Renamed from ScanResult to DiskScanResult for clarity.
     /// </summary>
-    public class ScanResult
+    public class DiskScanResult
     {
         public ConcurrentDictionary<string, MapDataItem> Data { get; } = new();
-        public List<ScanError> Errors { get; } = [];
+        public List<ScanError> Errors { get; } = new();
         public int SkippedSymlinks { get; set; }
         public int CloudFileCount { get; set; }
         public long CloudFileLogicalSize { get; set; } // Size if all cloud files were downloaded
@@ -23,34 +26,10 @@ namespace TreeMap
         public string? RootPath { get; set; }
 
         public bool HasErrors => Errors.Count > 0;
-        public string ErrorSummary => HasErrors 
+        public string ErrorSummary => HasErrors
             ? $"{Errors.Count} error(s): {Errors[0].Message}{(Errors.Count > 1 ? $" (+{Errors.Count - 1} more)" : "")}"
             : "";
-    }
 
-    public class ScanError
-    {
-        public string Path { get; init; } = "";
-        public string Message { get; init; } = "";
-        public string ExceptionType { get; init; } = "";
-    }
-
-    /// <summary>
-    /// Options for how to handle cloud-only files during scanning.
-    /// </summary>
-    public enum CloudFileHandling
-    {
-        /// <summary>Include cloud files with their logical size (as if downloaded)</summary>
-        IncludeLogicalSize,
-        /// <summary>Exclude cloud files from size calculations (they use minimal actual space)</summary>
-        ExcludeFromSize,
-        /// <summary>Include cloud files with estimated placeholder size (~1KB each)</summary>
-        IncludePlaceholderSize
-    }
-
-    // Simple, testable scanner that mirrors the directory scanning logic from MainWindow
-    public static class DiskScanner
-    {
         // OneDrive/cloud file attributes (Windows 10+)
         // FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x400000 - file data is not locally available
         // FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x40000 - file data will be recalled on open
@@ -74,71 +53,66 @@ namespace TreeMap
         }
 
         /// <summary>
-        /// Recalculates all sizes in a scan result based on a new cloud handling option.
-        /// This avoids needing to rescan the disk when the user changes the cloud handling preference.
+        /// Recalculates all sizes in this scan result based on a new cloud handling option.
         /// </summary>
-        public static void RecalculateSizes(ScanResult result, CloudFileHandling cloudHandling)
+        public void RecalculateSizes(CloudFileHandling cloudHandling)
         {
-            foreach (var kvp in result.Data)
+            foreach (var kvp in Data)
             {
                 var item = kvp.Value;
                 item.Size = CalculateSize(item.LocalSize, item.CloudLogicalSize, item.CloudFileCount, cloudHandling);
             }
         }
 
-        public static ConcurrentDictionary<string, MapDataItem> Scan(string rootPath)
-        {
-            // backward-compatible synchronous API; run the async scan and wait
-            return ScanAsync(rootPath, null, default).GetAwaiter().GetResult();
-        }
-
         /// <summary>
-        /// Scans a directory and returns detailed results including any errors.
+        /// Populate this DiskScanResult by scanning the given root path.
         /// </summary>
-        /// <param name="rootPath">The root directory to scan</param>
-        /// <param name="progress">Optional progress reporter</param>
-        /// <param name="cancellationToken">Cancellation token</param>
-        /// <param name="cloudHandling">How to handle cloud-only files (default: include logical size)</param>
-        public static Task<ScanResult> ScanWithErrorsAsync(
-            string rootPath, 
-            IProgress<string>? progress = null, 
-            System.Threading.CancellationToken cancellationToken = default,
-            CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
+        public async Task PopulateAsync(string rootPath, IProgress<string>? progress = null, System.Threading.CancellationToken cancellationToken = default, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
         {
-            var result = new ScanResult();
             if (!rootPath.EndsWith(TreeMapConstants.PathSep.ToString()))
             {
                 rootPath += TreeMapConstants.PathSep;
             }
-
-            return Task.Run(async () =>
-            {
-                // Record the root path on the result so callers can avoid re-inferring it from keys
-                result.RootPath = rootPath;
-                await ScanInternal(rootPath, rootPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
-                return result;
-            }, cancellationToken);
+            RootPath = rootPath;
+            await ScanInternal(rootPath, rootPath, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
         }
 
-        public static Task<ConcurrentDictionary<string, MapDataItem>> ScanAsync(string rootPath, IProgress<string>? progress = null, System.Threading.CancellationToken cancellationToken = default)
+        // Helper methods previously on the DiskScanner static helper are now private members
+        // so the DiskScanResult is self-contained.
+        private long GetFileSizeSafe(FileInfo finfo)
         {
-            // For backward compatibility, just return the data dictionary
-            return ScanWithErrorsAsync(rootPath, progress, cancellationToken)
-                .ContinueWith(t => t.Result.Data, cancellationToken);
+            try
+            {
+                return finfo.Length;
+            }
+            catch (FileNotFoundException ex)
+            {
+                this.Errors.Add(new ScanError { Path = finfo.FullName, Message = "File not found", ExceptionType = ex.GetType().Name });
+                return 0;
+            }
+            catch (IOException ex)
+            {
+                this.Errors.Add(new ScanError { Path = finfo.FullName, Message = ex.Message, ExceptionType = ex.GetType().Name });
+                return 0;
+            }
         }
 
-        /// <summary>
-        /// Checks if a file is a cloud-only placeholder (OneDrive, iCloud, etc.)
-        /// These files would trigger a download if we access their content.
-        /// </summary>
+        private void LogError(string path, Exception ex)
+        {
+            this.Errors.Add(new ScanError
+            {
+                Path = path,
+                Message = ex.Message,
+                ExceptionType = ex.GetType().Name
+            });
+        }
+
         private static bool IsCloudOnlyFile(FileAttributes attrs)
         {
-            // Check for cloud placeholder attributes
             if ((attrs & RecallOnDataAccess) != 0 || (attrs & RecallOnOpen) != 0)
             {
                 return true;
             }
-            // Also check Offline attribute which some cloud providers use
             if ((attrs & FileAttributes.Offline) != 0)
             {
                 return true;
@@ -146,50 +120,15 @@ namespace TreeMap
             return false;
         }
 
-        /// <summary>
-        /// Gets file size without triggering OneDrive download.
-        /// For cloud-only files, uses FileInfo.Length which reads from the reparse point metadata.
-        /// </summary>
-        private static long GetFileSizeSafe(FileInfo finfo, ScanResult result)
+        private async Task<(long localSize, long cloudLogicalSize, int fileCount)> ScanInternal(string cPath, string rootPath, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
         {
-            try
-            {
-                // FileInfo.Length reads the size from file metadata/reparse point
-                // without triggering a download for cloud files
-                return finfo.Length;
-            }
-            catch (FileNotFoundException ex)
-            {
-                result.Errors.Add(new ScanError { Path = finfo.FullName, Message = "File not found", ExceptionType = ex.GetType().Name });
-                return 0;
-            }
-            catch (IOException ex)
-            {
-                result.Errors.Add(new ScanError { Path = finfo.FullName, Message = ex.Message, ExceptionType = ex.GetType().Name });
-                return 0;
-            }
-        }
-
-        private static void LogError(ScanResult result, string path, Exception ex)
-        {
-            result.Errors.Add(new ScanError 
-            { 
-                Path = path, 
-                Message = ex.Message, 
-                ExceptionType = ex.GetType().Name 
-            });
-        }
-
-        private static async Task<(long localSize, long cloudLogicalSize, int fileCount)> ScanInternal(string cPath, string rootPath, ScanResult result, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
-        {
-            var dict = result.Data;
+            var dict = this.Data;
             long curdirLocalFileSize = 0;
             long curdirCloudLogicalSize = 0;
             long childLocalSize = 0;
             long childCloudLogicalSize = 0;
             int curdirFileCount = 0;
             int childFileCount = 0;
-            // Check cancellation and report progress
             cancellationToken.ThrowIfCancellationRequested();
             var relativePath = cPath.StartsWith(rootPath) ? cPath[rootPath.Length..] : cPath; if (string.IsNullOrEmpty(relativePath)) relativePath = "."; progress?.Report(relativePath);
 
@@ -199,20 +138,19 @@ namespace TreeMap
                 dirInfo = new DirectoryInfo(cPath);
                 if (!dirInfo.Exists)
                 {
-                    LogError(result, cPath, new DirectoryNotFoundException($"Directory not found: {cPath}"));
+                    LogError(cPath, new DirectoryNotFoundException($"Directory not found: {cPath}"));
                     return (0, 0, 0);
                 }
             }
             catch (Exception ex)
             {
-                LogError(result, cPath, ex);
+                LogError(cPath, ex);
                 return (0, 0, 0);
             }
 
-            // Skip reparse points (symlinks, junctions) to avoid infinite loops
             if ((dirInfo.Attributes & FileAttributes.ReparsePoint) != 0)
             {
-                result.SkippedSymlinks++;
+                this.SkippedSymlinks++;
                 return (0, 0, 0);
             }
 
@@ -222,20 +160,20 @@ namespace TreeMap
             {
                 curDirFiles = Directory.GetFiles(cPath);
             }
-            catch (UnauthorizedAccessException ex) 
-            { 
-                LogError(result, cPath, ex);
-                return (0, 0, 0); 
-            }
-            catch (DirectoryNotFoundException ex) 
-            { 
-                LogError(result, cPath, ex);
+            catch (UnauthorizedAccessException ex)
+            {
+                LogError(cPath, ex);
                 return (0, 0, 0);
             }
-            catch (IOException ex) 
-            { 
-                LogError(result, cPath, ex);
-                return (0, 0, 0); 
+            catch (DirectoryNotFoundException ex)
+            {
+                LogError(cPath, ex);
+                return (0, 0, 0);
+            }
+            catch (IOException ex)
+            {
+                LogError(cPath, ex);
+                return (0, 0, 0);
             }
 
             if (curDirFiles.Length > 0)
@@ -247,36 +185,31 @@ namespace TreeMap
                     try
                     {
                         var finfo = new FileInfo(file);
-                        var logicalSize = GetFileSizeSafe(finfo, result);
-
-                        // Track cloud-only files
+                        var logicalSize = GetFileSizeSafe(finfo);
                         if (IsCloudOnlyFile(finfo.Attributes))
                         {
-                            result.CloudFileCount++;
-                            result.CloudFileLogicalSize += logicalSize;
+                            this.CloudFileCount++;
+                            this.CloudFileLogicalSize += logicalSize;
                             cloudFileCountInDir++;
                             hasCloudFiles = true;
-
-                            // Store cloud logical size separately for recalculation
                             curdirCloudLogicalSize += logicalSize;
                         }
                         else
                         {
-                            // Local file - add actual size
                             curdirLocalFileSize += logicalSize;
                         }
                     }
-                    catch (PathTooLongException ex) 
-                    { 
-                        LogError(result, file, ex);
+                    catch (PathTooLongException ex)
+                    {
+                        LogError(file, ex);
                     }
-                    catch (UnauthorizedAccessException ex) 
-                    { 
-                        LogError(result, file, ex);
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        LogError(file, ex);
                     }
-                    catch (IOException ex) 
-                    { 
-                        LogError(result, file, ex);
+                    catch (IOException ex)
+                    {
+                        LogError(file, ex);
                     }
                 }
                 dict[cPath + TreeMapConstants.DataSuffix] = new MapDataItem()
@@ -298,17 +231,17 @@ namespace TreeMap
             {
                 curDirFolders = Directory.GetDirectories(cPath);
             }
-            catch (UnauthorizedAccessException ex) 
-            { 
-                LogError(result, cPath, ex);
+            catch (UnauthorizedAccessException ex)
+            {
+                LogError(cPath, ex);
             }
-            catch (DirectoryNotFoundException ex) 
-            { 
-                LogError(result, cPath, ex);
+            catch (DirectoryNotFoundException ex)
+            {
+                LogError(cPath, ex);
             }
-            catch (IOException ex) 
-            { 
-                LogError(result, cPath, ex);
+            catch (IOException ex)
+            {
+                LogError(cPath, ex);
             }
 
             if (curDirFolders.Length > 0)
@@ -316,11 +249,10 @@ namespace TreeMap
                 foreach (var dir in curDirFolders)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    // ensure trailing sep
                     var childPath = Path.Combine(cPath, Path.GetFileName(dir));
                     if (!childPath.EndsWith(TreeMapConstants.PathSep.ToString()))
                         childPath += TreeMapConstants.PathSep;
-                    var (childLocal, childCloud, childFiles) = await ScanInternal(childPath, rootPath, result, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
+                    var (childLocal, childCloud, childFiles) = await ScanInternal(childPath, rootPath, progress, cancellationToken, cloudHandling).ConfigureAwait(false);
                     childLocalSize += childLocal;
                     childCloudLogicalSize += childCloud;
                     childFileCount += childFiles;
@@ -330,17 +262,41 @@ namespace TreeMap
             var totalLocalSize = curdirLocalFileSize + childLocalSize;
             var totalCloudLogicalSize = curdirCloudLogicalSize + childCloudLogicalSize;
             var totalFileCount = curdirFileCount + childFileCount;
-            dict[cPath] = new MapDataItem() 
-            { 
-                Depth = nDepth, 
+            dict[cPath] = new MapDataItem()
+            {
+                Depth = nDepth,
                 Size = CalculateSize(totalLocalSize, totalCloudLogicalSize, 0, cloudHandling),
                 LocalSize = totalLocalSize,
                 CloudLogicalSize = totalCloudLogicalSize,
                 NumFiles = totalFileCount,
-                Index = dict.Count 
+                Index = dict.Count
             };
 
             return (totalLocalSize, totalCloudLogicalSize, totalFileCount);
         }
     }
+
+    public class ScanError
+    {
+        public string Path { get; init; } = "";
+        public string Message { get; init; } = "";
+        public string ExceptionType { get; init; } = "";
+    }
+
+    /// <summary>
+    /// Options for how to handle cloud-only files during scanning.
+    /// </summary>
+    public enum CloudFileHandling
+    {
+        /// <summary>Include cloud files with their logical size (as if downloaded)</summary>
+        IncludeLogicalSize,
+        /// <summary>Exclude cloud files from size calculations (they use minimal actual space)</summary>
+        ExcludeFromSize,
+        /// <summary>Include cloud files with estimated placeholder size (~1KB each)</summary>
+        IncludePlaceholderSize
+    }
+
+
+
+
 }

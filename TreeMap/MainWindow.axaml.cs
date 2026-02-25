@@ -17,7 +17,7 @@ namespace TreeMap;
 public partial class MainWindow : Window
 {
     // promoted shared state to instance fields to simplify extraction of helpers
-    private ScanResult? _lastScanResult;
+    private DiskScanResult? _lastScanResult;
     private bool _isRefreshingCombo;
     private UserSettings? _userSettings;
     private string? _initialPathToUse;
@@ -64,7 +64,7 @@ public partial class MainWindow : Window
                 if (_lastScanResult != null && !_lastScanResult.Data.IsEmpty)
                 {
                     var cloudHandling = GetCloudHandling(CloudHandlingCombo);
-                    DiskScanner.RecalculateSizes(_lastScanResult, cloudHandling);
+                    _lastScanResult.RecalculateSizes(cloudHandling);
                     _userSettings.CloudHandlingIndex = CloudHandlingCombo.SelectedIndex;
                     _userSettings.Save();
                     await this.RedrawTreemapAsync();
@@ -594,7 +594,7 @@ Implementation notes (from the code)
         Canvas treeCanvas,
         Border treeCanvasHost,
         Window parentWindow,
-        Action<ScanResult> onScanComplete)
+        Action<DiskScanResult> onScanComplete)
     {
         using var progressWindow = new ProgressWindow($"TreeMap - Scanning: {path}", cts);
         await progressWindow.ShowAsync();
@@ -606,7 +606,8 @@ Implementation notes (from the code)
             // Phase 1: Disk Scanning
             progressWindow.SetPhase($"📁 Scanning: {path}");
 
-            var scanResult = await DiskScanner.ScanWithErrorsAsync(path, progressWindow, cts.Token, cloudHandling);
+            var scanResult = new DiskScanResult();
+            await scanResult.PopulateAsync(path, progressWindow, cts.Token, cloudHandling);
 
             if (cts.IsCancellationRequested)
             {

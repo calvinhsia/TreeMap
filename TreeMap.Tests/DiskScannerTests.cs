@@ -21,7 +21,9 @@ public class DiskScannerTests
             var f2 = Path.Combine(sub, "b.txt");
             File.WriteAllText(f2, "world!"); // 6 bytes
 
-            var dict = DiskScanner.Scan(root);
+            var result = new DiskScanResult();
+            result.PopulateAsync(root).GetAwaiter().GetResult();
+            var dict = result.Data;
             // ensure keys with trailing sep exist
             var rootKey = root.EndsWith(TreeMap.TreeMapConstants.PathSep.ToString()) ? root : root + TreeMap.TreeMapConstants.PathSep;
             var subKey = rootKey + "subfolder" + TreeMap.TreeMapConstants.PathSep;
