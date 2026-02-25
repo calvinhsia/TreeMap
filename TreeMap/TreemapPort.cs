@@ -263,7 +263,7 @@ public static class TreemapPort
             var rectH = r.Height < 0 ? 0 : r.Height;
 
             var isCloudItem = dict.ContainsKey(key) && keyValue.IsCloudOnly;
-            var strokeBrush = isCloudItem ? Brushes.Cyan : Brushes.Black;
+            var strokeBrush = isCloudItem ? Brushes.Red : Brushes.Black;
             var strokeThickness = isCloudItem ? 3.0 : 1.0;
 
             var rect = new Avalonia.Controls.Shapes.Rectangle
