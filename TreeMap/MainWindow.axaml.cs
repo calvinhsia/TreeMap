@@ -59,11 +59,9 @@ public partial class MainWindow : Window
         _lastScanResult = null;
 
         // Wire up cloud handling combo - recalculate sizes without rescanning
-        if (CloudHandlingCombo != null)
-        {
-            CloudHandlingCombo.SelectionChanged += (s, args) =>
+        CloudHandlingCombo?.SelectionChanged += (s, args) =>
             {
-                if (_lastScanResult != null && _lastScanResult.Data.Count > 0)
+                if (_lastScanResult != null && !_lastScanResult.Data.IsEmpty)
                 {
                     var cloudHandling = GetCloudHandling(CloudHandlingCombo);
                     DiskScanner.RecalculateSizes(_lastScanResult, cloudHandling);
@@ -73,7 +71,6 @@ public partial class MainWindow : Window
                     //RedrawTreemap(TreeCanvas, TreeCanvasHost, CloudHandlingCombo);
                 }
             };
-        }
         this.ShowFileListBtn.Click += (o, e) =>
         {
             this.ShowBrowseList();
@@ -83,16 +80,13 @@ public partial class MainWindow : Window
             this.ShowErrors();
         };
         // Wire up swap orientation menu item
-        var swapOrientationMenuItem = this.FindControl<MenuItem>("SwapOrientationMenuItem");
-        if (swapOrientationMenuItem != null)
-        {
-            swapOrientationMenuItem.Click += async (s, args) =>
+        this.SwapOrientationMenuItem.Click += async (s, args) =>
             {
                 if (TreemapPort.CurrentDict != null && TreemapPort.CurrentRootPath != null)
                 {
                     TreeCanvas.Children.Clear();
                     var rootKey = TreemapPort.CurrentRootPath;
-                    long total = TreemapPort.CurrentDict.ContainsKey(rootKey) ? TreemapPort.CurrentDict[rootKey].Size : 0;
+                    long total = TreemapPort.CurrentDict.TryGetValue(rootKey, out MapDataItem? value) ? value.Size : 0;
                     // If total is still 0, sum up child sizes (same fallback as main scan)
                     if (total == 0)
                     {
@@ -104,13 +98,9 @@ public partial class MainWindow : Window
                     await TreemapPort.MakeTreemapAsync(TreemapPort.CurrentDict, TreeCanvas, rootKey, rect, total, !TreemapPort.CurrentHorizontal);
                 }
             };
-        }
 
         // Wire up open explorer menu item
-        var openExplorerMenuItem = this.FindControl<MenuItem>("OpenExplorerMenuItem");
-        if (openExplorerMenuItem != null)
-        {
-            openExplorerMenuItem.Click += (s, args) =>
+        this.OpenExplorerMenuItem.Click += (s, args) =>
             {
                 var pathToOpen = TreemapPort.LastClickedPath ?? TreemapPort.CurrentRootPath;
                 if (!string.IsNullOrEmpty(pathToOpen))
@@ -119,7 +109,7 @@ public partial class MainWindow : Window
                     {
                         // Remove trailing separator and data suffix for explorer
                         var cleanPath = pathToOpen.TrimEnd(TreeMapConstants.PathSep);
-                        if (cleanPath.EndsWith("*"))
+                        if (cleanPath.EndsWith('*'))
                             cleanPath = cleanPath.TrimEnd('*').TrimEnd(TreeMapConstants.PathSep);
 
                         // Open folder in explorer
@@ -136,23 +126,19 @@ public partial class MainWindow : Window
                     }
                 }
             };
-        }
 
         // Initialize error button visual state
         UpdateErrorsButton();
 
         // Wire up new window menu item
-        var newWindowMenuItem = this.FindControl<MenuItem>("NewWindowMenuItem");
-        if (newWindowMenuItem != null)
-        {
-            newWindowMenuItem.Click += (s, args) =>
+        this.NewWindowMenuItem.Click += (s, args) =>
             {
                 var pathForNewWindow = TreemapPort.LastClickedPath ?? TreemapPort.CurrentRootPath;
                 if (!string.IsNullOrEmpty(pathForNewWindow))
                 {
                     // Clean the path
                     var cleanPath = pathForNewWindow.TrimEnd(TreeMapConstants.PathSep);
-                    if (cleanPath.EndsWith("*"))
+                    if (cleanPath.EndsWith('*'))
                         cleanPath = cleanPath.TrimEnd('*').TrimEnd(TreeMapConstants.PathSep);
 
                     // Create and show a new window
@@ -181,11 +167,9 @@ public partial class MainWindow : Window
                     newWindow.Show();
                 }
             };
-        }
 
         // Use the Border (TreeCanvasHost) to detect valid bounds since Canvas doesn't stretch
         bool initialScanDone = false;
-        //System.Action<string>? runScan = null;
         TreeCanvasHost.LayoutUpdated += (s, ev) =>
         {
             try
@@ -202,7 +186,7 @@ public partial class MainWindow : Window
                     }
                     SetPath(this.PathCombo, initialPath);
                     //Avalonia.Threading.Dispatcher.UIThread.Post(() => runScan?.Invoke(initialPath), Avalonia.Threading.DispatcherPriority.Background);
-                    runScan(initialPath);
+                    DoRunScan(initialPath);
                 }
             }
             catch { }
@@ -219,7 +203,7 @@ public partial class MainWindow : Window
         this.ScanBtn.Click += (_, __) =>
         {
             var path = GetPath(this.PathCombo);
-            runScan(path);
+            DoRunScan(path);
         };
 
         // Wire up path combo selection changed - scan when user selects from MRU dropdown
@@ -234,7 +218,7 @@ public partial class MainWindow : Window
                 // Only scan if selection actually changed (not just programmatic refresh)
                 if (!string.IsNullOrEmpty(selectedPath))
                 {
-                    runScan(selectedPath);
+                    DoRunScan(selectedPath);
                 }
             }
         };
@@ -245,18 +229,16 @@ public partial class MainWindow : Window
             if (e.Key == Avalonia.Input.Key.Enter)
             {
                 var path = GetPath(this.PathCombo);
-                if (!string.IsNullOrEmpty(path) && runScan != null)
+                if (!string.IsNullOrEmpty(path))
                 {
-                    runScan(path);
+                    DoRunScan(path);
                     e.Handled = true;
                 }
             }
         };
 
         // Folder picker using Avalonia's OpenFolderDialog
-        if (BrowseBtn != null)
-        {
-            BrowseBtn.Click += async (_, __) =>
+        BrowseBtn.Click += async (_, __) =>
             {
                 try
                 {
@@ -272,7 +254,7 @@ public partial class MainWindow : Window
                         if (!string.IsNullOrEmpty(fldr))
                         {
                             SetPath(this.PathCombo, fldr);
-                            runScan(fldr);
+                            DoRunScan(fldr);
                         }                  }
                     //var dlg = new OpenFolderDialog();
                     //var result = await dlg.ShowAsync(this);
@@ -288,7 +270,6 @@ public partial class MainWindow : Window
                     System.Diagnostics.Trace.WriteLine("Folder picker failed: " + ex);
                 }
             };
-        }
 
         //// Trigger an automatic initial scan of current directory after layout settles
         //this.AttachedToVisualTree += (s, e) =>
@@ -318,8 +299,7 @@ public partial class MainWindow : Window
         {
             if (_lastScanResult == null || !_lastScanResult.HasErrors)
             {
-                if (StatusText != null)
-                    StatusText.Text = "No scan errors";
+                StatusText?.Text = "No scan errors";
                 return;
             }
 
@@ -327,25 +307,24 @@ public partial class MainWindow : Window
                         orderby err.Path
                         select new
                         {
-                            Path = err.Path,
-                            Message = err.Message,
+                            err.Path,
+                            err.Message,
                             Exception = err.ExceptionType
                         };
 
-            var browse = new BrowseControl(items, new[] { 600, 600, 150 }, true);
-            var errWindow = new Window()
+            var browse = new BrowseControl(items, [600, 600, 150], true);
+            var errWindow = new Window
             {
                 WindowState = WindowState.Maximized,
                 ShowInTaskbar = false,
-                Title = $"Scan Errors - {_lastScanResult.RootPath}"
+                Title = $"Scan Errors - {_lastScanResult.RootPath}",
+                Content = browse
             };
-            errWindow.Content = browse;
             errWindow.Show(this);
         }
         catch (System.Exception ex)
         {
-            if (StatusText != null)
-                StatusText.Text = ex.Message;
+            StatusText?.Text = ex.Message;
         }
     }
 
@@ -381,23 +360,23 @@ Implementation notes (from the code)
                         select new
                         {
                             // Remove the root prefix to save horizontal space in the list
-                            Path = kv.Key.Substring(rootLength),
-                            Size = kv.Value.Size,
-                            LocalSize = kv.Value.LocalSize,
+                            Path = kv.Key[rootLength..],
+                            kv.Value.Size,
+                            kv.Value.LocalSize,
                             kv.Value.CloudLogicalSize,
                             Files = kv.Value.NumFiles > 0 ? kv.Value.NumFiles.ToString() : "",
                             CloudFiles = kv.Value.CloudFileCount > 0 ? kv.Value.CloudFileCount.ToString() : "",
                             kv.Value.IsCloudOnly,
                             kv.Value.Depth,
                         };
-            var browse = new BrowseControl(items, new[] { 500, 100, 100, 100, 100, 70 }, true);
-            var fileListWIndow = new Window()
+            var browse = new BrowseControl(items, [500, 100, 100, 100, 100, 70], true);
+            var fileListWIndow = new Window
             {
                 WindowState = WindowState.Maximized,
                 ShowInTaskbar = false,
-                Title = $"TreeMap {_lastScanResult.RootPath}"
+                Title = $"TreeMap {_lastScanResult.RootPath}",
+                Content = browse
             };
-            fileListWIndow.Content = browse;
             fileListWIndow.Show(this);
 
         }
@@ -424,7 +403,7 @@ Implementation notes (from the code)
         }
     }
 
-    void runScan(string path)
+    void DoRunScan(string path)
     {
         // Add to MRU before scanning
         AddToMruList(path, CloudHandlingCombo, this.PathCombo);
@@ -497,7 +476,7 @@ Implementation notes (from the code)
 
     private void RedrawTreemap()
     {
-        if (_lastScanResult == null || _lastScanResult.Data.Count == 0)
+        if (_lastScanResult == null || _lastScanResult.Data.IsEmpty)
             return;
 
         var dict = _lastScanResult.Data;
@@ -518,7 +497,7 @@ Implementation notes (from the code)
         if (rootKey == null)
             return;
 
-        long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
+        long total = dict.TryGetValue(rootKey, out MapDataItem? value) ? value.Size : 0;
         if (total == 0)
         {
             foreach (var v in dict.Values) total += v.Size;
@@ -551,7 +530,7 @@ Implementation notes (from the code)
     }
 
     // Extracted focused helpers used by InitializeAfterOpened
-    private string GetPath(ComboBox pathCombo)
+    private static string GetPath(ComboBox pathCombo)
     {
         var text = pathCombo?.SelectedItem?.ToString();
         if (string.IsNullOrEmpty(text))
@@ -562,13 +541,10 @@ Implementation notes (from the code)
         return text ?? System.IO.Directory.GetCurrentDirectory();
     }
 
-    private void SetPath(ComboBox pathCombo, string path)
+    private static void SetPath(ComboBox pathCombo, string path)
     {
         var textBox = pathCombo?.GetVisualDescendants().OfType<TextBox>().FirstOrDefault();
-        if (textBox != null)
-        {
-            textBox.Text = path;
-        }
+        textBox?.Text = path;
     }
 
     private void AddToMruList(string path, ComboBox? cloudHandlingCombo, ComboBox pathCombo)
@@ -594,7 +570,7 @@ Implementation notes (from the code)
         _isRefreshingCombo = false;
     }
 
-    private CloudFileHandling GetCloudHandling(ComboBox? cloudHandlingCombo)
+    private static CloudFileHandling GetCloudHandling(ComboBox? cloudHandlingCombo)
     {
         return cloudHandlingCombo?.SelectedIndex switch
         {
@@ -606,7 +582,7 @@ Implementation notes (from the code)
 
     private void RedrawTreemap(Canvas treeCanvas, Border treeCanvasHost, ComboBox? cloudHandlingCombo)
     {
-        if (_lastScanResult == null || _lastScanResult.Data.Count == 0)
+        if (_lastScanResult == null || _lastScanResult.Data.IsEmpty)
             return;
 
         var dict = _lastScanResult.Data;
@@ -626,7 +602,7 @@ Implementation notes (from the code)
         if (rootKey == null)
             return;
 
-        long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
+        long total = dict.TryGetValue(rootKey, out MapDataItem? value) ? value.Size : 0;
         if (total == 0)
         {
             foreach (var v in dict.Values) total += v.Size;
@@ -719,7 +695,7 @@ Implementation notes (from the code)
                     System.Diagnostics.Debug.WriteLine($"  ... and {scanResult.Errors.Count - 10} more errors");
             }
 
-            if (dict.Count == 0)
+            if (dict.IsEmpty)
             {
                 StatusText.Text = "No items found";
                 return;
@@ -745,7 +721,7 @@ Implementation notes (from the code)
             }
             rootKey ??= path + TreeMapConstants.PathSep;
 
-            long total = dict.ContainsKey(rootKey) ? dict[rootKey].Size : 0;
+            long total = dict.TryGetValue(rootKey, out MapDataItem? value) ? value.Size : 0;
             if (total == 0)
             {
                 foreach (var v in dict.Values) total += v.Size;

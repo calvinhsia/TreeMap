@@ -14,7 +14,7 @@ namespace TreeMap
     public class ScanResult
     {
         public ConcurrentDictionary<string, MapDataItem> Data { get; } = new();
-        public List<ScanError> Errors { get; } = new();
+        public List<ScanError> Errors { get; } = [];
         public int SkippedSymlinks { get; set; }
         public int CloudFileCount { get; set; }
         public long CloudFileLogicalSize { get; set; } // Size if all cloud files were downloaded
@@ -191,7 +191,7 @@ namespace TreeMap
             int childFileCount = 0;
             // Check cancellation and report progress
             cancellationToken.ThrowIfCancellationRequested();
-            var relativePath = cPath.StartsWith(rootPath) ? cPath.Substring(rootPath.Length) : cPath; if (string.IsNullOrEmpty(relativePath)) relativePath = "."; progress?.Report(relativePath);
+            var relativePath = cPath.StartsWith(rootPath) ? cPath[rootPath.Length..] : cPath; if (string.IsNullOrEmpty(relativePath)) relativePath = "."; progress?.Report(relativePath);
 
             DirectoryInfo dirInfo;
             try
@@ -217,7 +217,7 @@ namespace TreeMap
             }
 
             var nDepth = cPath.Where(c => c == TreeMapConstants.PathSep).Count();
-            string[] curDirFiles = Array.Empty<string>();
+            string[] curDirFiles = [];
             try
             {
                 curDirFiles = Directory.GetFiles(cPath);
@@ -293,7 +293,7 @@ namespace TreeMap
                 curdirFileCount = curDirFiles.Length;
             }
 
-            string[] curDirFolders = Array.Empty<string>();
+            string[] curDirFolders = [];
             try
             {
                 curDirFolders = Directory.GetDirectories(cPath);
