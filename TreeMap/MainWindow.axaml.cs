@@ -59,7 +59,7 @@ public partial class MainWindow : Window
         _lastScanResult = null;
 
         // Wire up cloud handling combo - recalculate sizes without rescanning
-        CloudHandlingCombo?.SelectionChanged += (s, args) =>
+        CloudHandlingCombo?.SelectionChanged += async (s, args) =>
             {
                 if (_lastScanResult != null && !_lastScanResult.Data.IsEmpty)
                 {
@@ -67,7 +67,7 @@ public partial class MainWindow : Window
                     DiskScanner.RecalculateSizes(_lastScanResult, cloudHandling);
                     _userSettings.CloudHandlingIndex = CloudHandlingCombo.SelectedIndex;
                     _userSettings.Save();
-                    this.RedrawTreemap();
+                    await this.RedrawTreemapAsync();
                     //RedrawTreemap(TreeCanvas, TreeCanvasHost, CloudHandlingCombo);
                 }
             };
@@ -474,7 +474,7 @@ Implementation notes (from the code)
         catch { }
     }
 
-    private void RedrawTreemap()
+    private async Task RedrawTreemapAsync()
     {
         if (_lastScanResult == null || _lastScanResult.Data.IsEmpty)
             return;
@@ -511,8 +511,8 @@ Implementation notes (from the code)
         TreeCanvas.Width = rect.Width;
         TreeCanvas.Height = rect.Height;
 
-        // Redraw synchronously (data is already in memory)
-        TreemapPort.MakeTreemap(dict, TreeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
+        // Redraw using async renderer
+        await TreemapPort.MakeTreemapAsync(dict, TreeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
 
         // Update status text with summary
         if (StatusText != null)
@@ -580,57 +580,7 @@ Implementation notes (from the code)
         };
     }
 
-    private void RedrawTreemap(Canvas treeCanvas, Border treeCanvasHost, ComboBox? cloudHandlingCombo)
-    {
-        if (_lastScanResult == null || _lastScanResult.Data.IsEmpty)
-            return;
-
-        var dict = _lastScanResult.Data;
-        treeCanvas.Children.Clear();
-
-        string? rootKey = _lastScanResult?.RootPath;
-        if (rootKey == null)
-        {
-            foreach (var k in dict.Keys)
-            {
-                if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
-                {
-                    if (rootKey == null || k.Length < rootKey.Length) rootKey = k;
-                }
-            }
-        }
-        if (rootKey == null)
-            return;
-
-        long total = dict.TryGetValue(rootKey, out MapDataItem? value) ? value.Size : 0;
-        if (total == 0)
-        {
-            foreach (var v in dict.Values) total += v.Size;
-        }
-
-        var availW = treeCanvasHost.Bounds.Width;
-        var availH = treeCanvasHost.Bounds.Height;
-        if (availW <= 0) availW = this.Bounds.Width - 360;
-        if (availH <= 0) availH = this.Bounds.Height - 120;
-        var rect = new Rect(0, 0, availW > 0 ? availW : 800, availH > 0 ? availH : 600);
-        treeCanvas.Width = rect.Width;
-        treeCanvas.Height = rect.Height;
-
-        TreemapPort.MakeTreemap(dict, treeCanvas, rootKey, rect, total, TreemapPort.CurrentHorizontal);
-
-        var statusText = this.FindControl<TextBlock>("StatusText");
-        if (statusText != null)
-        {
-            var cloudHandling = GetCloudHandling(cloudHandlingCombo);
-            var modeStr = cloudHandling switch
-            {
-                CloudFileHandling.ExcludeFromSize => "Cloud: Excluded",
-                CloudFileHandling.IncludePlaceholderSize => "Cloud: Placeholder",
-                _ => "Cloud: Logical Size"
-            };
-            statusText.Text = $"Items: {dict.Count:n0}, {modeStr}";
-        }
-    }
+    // Single RedrawTreemap method retained (parameterless) to simplify callers.
 
     /// <summary>
     /// Runs disk scan and treemap rendering with a unified progress window.
