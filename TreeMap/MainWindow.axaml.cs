@@ -6,6 +6,8 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using System;
+using Avalonia.Media;
+using Avalonia.Threading;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -133,9 +135,11 @@ public partial class MainWindow : Window
                         System.Diagnostics.Debug.WriteLine($"Failed to open explorer: {ex.Message}");
                     }
                 }
-
             };
         }
+
+        // Initialize error button visual state
+        UpdateErrorsButton();
 
         // Wire up new window menu item
         var newWindowMenuItem = this.FindControl<MenuItem>("NewWindowMenuItem");
@@ -328,7 +332,7 @@ public partial class MainWindow : Window
                             Exception = err.ExceptionType
                         };
 
-            var browse = new BrowseControl(items, new[] { 500, 400, 150 }, true);
+            var browse = new BrowseControl(items, new[] { 600, 600, 150 }, true);
             var errWindow = new Window()
             {
                 WindowState = WindowState.Maximized,
@@ -424,17 +428,6 @@ Implementation notes (from the code)
     {
         // Add to MRU before scanning
         AddToMruList(path, CloudHandlingCombo, this.PathCombo);
-        // Switch to treemap view if currently showing file list (file list becomes stale with new scan)
-        //if (LeftHost.IsVisible)
-        //{
-        //    LeftHost.IsVisible = false;
-        //    TreeCanvasHost.IsVisible = true;
-        //    var newText = "Show File List";
-        //    if (ToggleViewBtn != null) ToggleViewBtn.Content = newText;
-        //    if (ToggleBrowseMenuItem != null) ToggleBrowseMenuItem.Header = newText;
-        //    var toggleTreemapMenuItem = this.FindControl<MenuItem>("ToggleTreemapMenuItem");
-        //    if (toggleTreemapMenuItem != null) toggleTreemapMenuItem.Header = newText;
-        //}
 
         // Create unified progress window for both scanning and rendering
         var cts = new System.Threading.CancellationTokenSource();
@@ -442,19 +435,64 @@ Implementation notes (from the code)
         // Get the selected cloud handling mode
         var cloudHandling = GetCloudHandling(CloudHandlingCombo);
 
+        // Disable the errors button while scanning
+        try
+        {
+            if (ShowErrorsBtn != null)
+            {
+                ShowErrorsBtn.IsEnabled = false;
+                ShowErrorsBtn.Content = "Show Errors";
+                ShowErrorsBtn.Background = null;
+                ShowErrorsBtn.Foreground = Brushes.Black;
+            }
+        }
+        catch { }
+
         // Run the combined scan + render operation
         _ = RunScanAndRenderAsync(path, cloudHandling, cts, TreeCanvas, TreeCanvasHost, this,
             result =>
             {
-                _lastScanResult = result;
-                try
+                // Marshal UI updates to the UI thread
+                Dispatcher.UIThread.Post(() =>
                 {
-                    // Ensure the UI shows the path that was scanned
-                    SetPath(this.PathCombo, path);
-                }
-                catch { }
-            });
+                    _lastScanResult = result;
+                    try
+                    {
+                        // Ensure the UI shows the path that was scanned
+                        SetPath(this.PathCombo, path);
+                    }
+                    catch { }
 
+                    UpdateErrorsButton();
+                });
+            });
+    }
+
+    private void UpdateErrorsButton()
+    {
+        try
+        {
+            if (ShowErrorsBtn == null)
+                return;
+
+            if (_lastScanResult == null || !_lastScanResult.HasErrors)
+            {
+                ShowErrorsBtn.IsEnabled = false;
+                ShowErrorsBtn.Content = "Show Errors";
+                ShowErrorsBtn.Background = null;
+                ShowErrorsBtn.Foreground = Brushes.Black;
+            }
+            else
+            {
+                var count = _lastScanResult.Errors.Count;
+                ShowErrorsBtn.IsEnabled = true;
+                ShowErrorsBtn.Content = $"Show Errors ({count})";
+                // Use a visible accent so the user notices there are errors
+                ShowErrorsBtn.Background = Brushes.OrangeRed;
+                ShowErrorsBtn.Foreground = Brushes.White;
+            }
+        }
+        catch { }
     }
 
     private void RedrawTreemap()
