@@ -21,8 +21,6 @@ namespace TreeMap
         public int SkippedSymlinks { get; set; }
         public int CloudFileCount { get; set; }
         public long CloudFileLogicalSize { get; set; } // Size if all cloud files were downloaded
-        // RootPath of the scan (trailing path separator included). Set by ScanWithErrorsAsync so callers
-        // don't need to infer the root from the dictionary keys.
         public string? RootPath { get; set; }
 
         public bool HasErrors => Errors.Count > 0;
@@ -119,7 +117,7 @@ namespace TreeMap
             }
             return false;
         }
-
+        private int _filesProcessed = 0;
         private async Task<(long localSize, long cloudLogicalSize, int fileCount)> ScanInternal(string cPath, string rootPath, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
         {
             var dict = this.Data;
@@ -130,7 +128,15 @@ namespace TreeMap
             int curdirFileCount = 0;
             int childFileCount = 0;
             cancellationToken.ThrowIfCancellationRequested();
-            var relativePath = cPath.StartsWith(rootPath) ? cPath[rootPath.Length..] : cPath; if (string.IsNullOrEmpty(relativePath)) relativePath = "."; progress?.Report(relativePath);
+            var relativePath = cPath.StartsWith(rootPath) ? cPath[rootPath.Length..] : cPath;
+            if (string.IsNullOrEmpty(relativePath))
+            {
+                relativePath = ".";
+            }
+            if (_filesProcessed++ % 100 == 0)
+            {
+               progress?.Report(relativePath);
+            }
 
             DirectoryInfo dirInfo;
             try

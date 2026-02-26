@@ -607,7 +607,10 @@ Implementation notes (from the code)
             progressWindow.SetPhase($"📁 Scanning: {path}");
 
             var scanResult = new DiskScanResult();
-            await scanResult.PopulateAsync(path, progressWindow, cts.Token, cloudHandling);
+            await Task.Run(async () => // run in background thread
+            {
+                await scanResult.PopulateAsync(path, progressWindow, cts.Token, cloudHandling);
+            });
 
             if (cts.IsCancellationRequested)
             {
