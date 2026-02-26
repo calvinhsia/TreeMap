@@ -23,7 +23,7 @@ public class DiskScannerTests
 
             var result = new DiskScanResult();
             result.PopulateAsync(root).GetAwaiter().GetResult();
-            var dict = result.Data;
+            var dict = result.dictData;
             // ensure keys with trailing sep exist
             var rootKey = root.EndsWith(TreeMap.TreeMapConstants.PathSep.ToString()) ? root : root + TreeMap.TreeMapConstants.PathSep;
             var subKey = rootKey + "subfolder" + TreeMap.TreeMapConstants.PathSep;
