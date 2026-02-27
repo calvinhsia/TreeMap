@@ -1,0 +1,51 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="TreeMap.MainWindow"
+        Title="TreeMap (Avalonia)" Icon="avares://TreeMap/Assets/treemap-icon.png"
+        
+        Width="1000" Height="700"
+        WindowState="Maximized"
+        Background="#FFFFFFFF">
+    <Grid RowDefinitions="Auto,*">
+        <StackPanel Orientation="Horizontal" Margin="8" Grid.Row="0">
+            <!-- Path dropdown with MRU history -->
+            <ComboBox Name="PathCombo" Width="700" IsEditable="True" />
+            <Button Name="BrowseBtn" Content="ChooseFolder"  Margin="8,0,0,0" ToolTip.Tip="Choose a folder" />
+            <Button Name="ScanBtn" Content="Scan" Margin="8,0,0,0" />
+            <TextBlock Text="Cloud:" Margin="12,0,4,0" VerticalAlignment="Center" />
+            <ComboBox Name="CloudHandlingCombo" Width="140" SelectedIndex="0" VerticalAlignment="Center">
+                <ComboBoxItem Content="Show logical size" />
+                <ComboBoxItem Content="Exclude from size" />
+                <ComboBoxItem Content="Placeholder size" />
+            </ComboBox>
+            <Button Name="ShowFileListBtn" Content="Show File List" Margin="8,0,0,0" ToolTip.Tip="Show the raw data in a sortable exportable view (Alt-F)"/>
+            <Button Name="ShowErrorsBtn" Content="Show Errors" Margin="8,0,0,0" ToolTip.Tip="Show scan errors (if any)"/>
+            <TextBlock Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Grid Name="ContentGrid" Grid.Row="1">
+            <!-- File list - hidden by default, takes full space when shown -->
+            <!--<ContentControl Name="LeftHost" Background="#FFF8F8F8" IsVisible="False">
+                <ContentControl.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Name="ToggleTreemapMenuItem" Header="Show Treemap" />
+                    </ContextMenu>
+                </ContentControl.ContextMenu>
+            </ContentControl>-->
+            <!-- Treemap - visible by default, takes full space -->
+            <Border Name="TreeCanvasHost" Background="#FFFFFFFF" ClipToBounds="True">
+                <Canvas Name="TreeCanvas">
+                    <Canvas.ContextMenu>
+                        <ContextMenu>
+                            <!--<MenuItem Name="ToggleBrowseMenuItem" Header="Show File List" />-->
+                            <MenuItem Name="SwapOrientationMenuItem" Header="Swap Horizontal/Vertical" />
+                            <Separator />
+                            <MenuItem Name="OpenExplorerMenuItem" Header="Open in Explorer" />
+                            <MenuItem Name="NewWindowMenuItem" Header="New Window at Selection" />
+                        </ContextMenu>
+                    </Canvas.ContextMenu>
+                </Canvas>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

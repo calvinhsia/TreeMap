@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Background -->
+  <rect x="2" y="2" width="60" height="60" rx="4" fill="#1e3a5f" stroke="#2d5a87" stroke-width="2"/>
+  
+  <!-- Treemap rectangles - representing disk space blocks -->
+  <!-- Large block (top-left) -->
+  <rect x="6" y="6" width="28" height="32" fill="#4a9eff" rx="2"/>
+  
+  <!-- Medium block (top-right) -->
+  <rect x="36" y="6" width="22" height="18" fill="#7bc47f" rx="2"/>
+  
+  <!-- Small block (middle-right) -->
+  <rect x="36" y="26" width="22" height="12" fill="#ffb347" rx="2"/>
+  
+  <!-- Bottom-left block -->
+  <rect x="6" y="40" width="16" height="18" fill="#ff6b6b" rx="2"/>
+  
+  <!-- Bottom-middle block -->
+  <rect x="24" y="40" width="18" height="18" fill="#c49bff" rx="2"/>
+  
+  <!-- Bottom-right block -->
+  <rect x="44" y="40" width="14" height="18" fill="#5dd9c1" rx="2"/>
+</svg>

@@ -14,17 +14,13 @@ namespace TreeMap.Properties
 
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "11.0.0.0")]
-    internal sealed partial class Settings : global::System.Configuration.ApplicationSettingsBase
+    // ApplicationSettingsBase moved to System.Configuration.ConfigurationManager package on .NET Core/.NET 5+
+    // Replace with a lightweight stub so the project can build without the legacy assembly.
+    internal sealed partial class Settings
     {
+        // simple stub for Settings.Default used by legacy code
+        private static readonly Settings defaultInstance = new Settings();
 
-        private static Settings defaultInstance = ((Settings)(global::System.Configuration.ApplicationSettingsBase.Synchronized(new Settings())));
-
-        public static Settings Default
-        {
-            get
-            {
-                return defaultInstance;
-            }
-        }
+        public static Settings Default => defaultInstance;
     }
 }
