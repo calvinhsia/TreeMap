@@ -36,10 +36,16 @@ jobs:
     name: Publish artifacts (on tag)
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        rid: [win-x64, linux-x64, osx-x64]
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: linux-x64
+            os: ubuntu-latest
+          - rid: osx-x64
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup .NET
@@ -48,21 +54,22 @@ jobs:
           dotnet-version: 10.0.x
       - name: Publish (${{ matrix.rid }})
         run: |
-          dotnet publish TreeMap/TreeMap.csproj -c Release -r ${{ matrix.rid }} \
+          dotnet publish TreeMap/TreeMap.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
             --self-contained true \
-            /p:PublishSingleFile=true \
-            /p:IncludeNativeLibrariesForSelfExtract=true \
-            /p:IncludeAllContentForSelfExtract=true \
+            -p:PublishSingleFile=true \
+            -p:EnableCompressionInSingleFile=true \
             -o ./artifacts/${{ matrix.rid }}
-      - name: Prepare artifact
-        run: |
-          cd ./artifacts/${{ matrix.rid }}
-          # Rename exe for clarity (Windows has .exe, others don't)
-          if [ "${{ matrix.rid }}" = "win-x64" ]; then
-            mv TreeMap.exe ../TreeMap-${{ matrix.rid }}.exe
-          else
-            mv TreeMap ../TreeMap-${{ matrix.rid }}
-          fi
+        shell: bash
+      - name: Prepare artifact (Windows)
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: Move-Item ./artifacts/${{ matrix.rid }}/TreeMap.exe ./artifacts/TreeMap-${{ matrix.rid }}.exe
+      - name: Prepare artifact (Linux/macOS)
+        if: matrix.rid != 'win-x64'
+        shell: bash
+        run: mv ./artifacts/${{ matrix.rid }}/TreeMap ./artifacts/TreeMap-${{ matrix.rid }}
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
