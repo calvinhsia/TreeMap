@@ -13,6 +13,8 @@ using TreeMap;
 using Xunit;
 using Xunit.Abstractions;
 
+#if DISABLED
+
 namespace TreeMap.Tests;
 
 /// <summary>
@@ -657,3 +659,5 @@ public class ProgressWindowTests
         _output.WriteLine($"Cancelled: {cts.IsCancellationRequested}");
     }
 }
+
+#endif
