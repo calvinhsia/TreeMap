@@ -81,7 +81,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
-          merge-multiple: false
+          merge-multiple: true
       - name: List artifacts
         run: find ./artifacts -type f
       - name: Create release and upload assets
@@ -97,7 +97,7 @@ jobs:
             - **Windows (x64)**: `TreeMap-win-x64.exe`
             - **Linux (x64)**: `TreeMap-linux-x64` (run `chmod +x` first)
             - **macOS (x64)**: `TreeMap-osx-x64` (run `chmod +x` first)
-          artifacts: ./artifacts/**/*
+          artifacts: ./artifacts/*
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
