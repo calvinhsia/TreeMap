@@ -16,7 +16,7 @@ namespace TreeMap
     /// </summary>
     public class DiskScanResult
     {
-        public ConcurrentDictionary<string, MapDataItem> Data { get; } = new();
+        public ConcurrentDictionary<string, MapDataItem> dictData { get; } = new();
         public List<ScanError> Errors { get; } = new();
         public int SkippedSymlinks { get; set; }
         public int CloudFileCount { get; set; }
@@ -55,7 +55,7 @@ namespace TreeMap
         /// </summary>
         public void RecalculateSizes(CloudFileHandling cloudHandling)
         {
-            foreach (var kvp in Data)
+            foreach (var kvp in dictData)
             {
                 var item = kvp.Value;
                 item.Size = CalculateSize(item.LocalSize, item.CloudLogicalSize, item.CloudFileCount, cloudHandling);
@@ -120,7 +120,6 @@ namespace TreeMap
         private int _filesProcessed = 0;
         private async Task<(long localSize, long cloudLogicalSize, int fileCount)> ScanInternal(string cPath, string rootPath, IProgress<string>? progress, System.Threading.CancellationToken cancellationToken, CloudFileHandling cloudHandling = CloudFileHandling.IncludeLogicalSize)
         {
-            var dict = this.Data;
             long curdirLocalFileSize = 0;
             long curdirCloudLogicalSize = 0;
             long childLocalSize = 0;
@@ -218,14 +217,14 @@ namespace TreeMap
                         LogError(file, ex);
                     }
                 }
-                dict[cPath + TreeMapConstants.DataSuffix] = new MapDataItem()
+                this.dictData[cPath + TreeMapConstants.DataSuffix] = new MapDataItem()
                 {
                     Depth = nDepth + 1,
                     Size = CalculateSize(curdirLocalFileSize, curdirCloudLogicalSize, cloudFileCountInDir, cloudHandling),
                     LocalSize = curdirLocalFileSize,
                     CloudLogicalSize = curdirCloudLogicalSize,
                     NumFiles = curDirFiles.Length,
-                    Index = dict.Count,
+                    Index = this.dictData.Count,
                     IsCloudOnly = hasCloudFiles,
                     CloudFileCount = cloudFileCountInDir
                 };
@@ -268,14 +267,14 @@ namespace TreeMap
             var totalLocalSize = curdirLocalFileSize + childLocalSize;
             var totalCloudLogicalSize = curdirCloudLogicalSize + childCloudLogicalSize;
             var totalFileCount = curdirFileCount + childFileCount;
-            dict[cPath] = new MapDataItem()
+            this.dictData[cPath] = new MapDataItem()
             {
                 Depth = nDepth,
                 Size = CalculateSize(totalLocalSize, totalCloudLogicalSize, 0, cloudHandling),
                 LocalSize = totalLocalSize,
                 CloudLogicalSize = totalCloudLogicalSize,
                 NumFiles = totalFileCount,
-                Index = dict.Count
+                Index = this.dictData.Count
             };
 
             return (totalLocalSize, totalCloudLogicalSize, totalFileCount);

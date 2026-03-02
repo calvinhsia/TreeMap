@@ -61,7 +61,7 @@ public partial class MainWindow : Window
         // Wire up cloud handling combo - recalculate sizes without rescanning
         CloudHandlingCombo?.SelectionChanged += async (s, args) =>
             {
-                if (_lastScanResult != null && !_lastScanResult.Data.IsEmpty)
+                if (_lastScanResult != null && !_lastScanResult.dictData.IsEmpty)
                 {
                     var cloudHandling = GetCloudHandling(CloudHandlingCombo);
                     _lastScanResult.RecalculateSizes(cloudHandling);
@@ -355,7 +355,7 @@ Implementation notes (from the code)
             var rootPrefix = _lastScanResult.RootPath ?? string.Empty;
             var rootLength = rootPrefix.Length > 0 ? rootPrefix.Length - 1 : 0;
 
-            var items = from kv in _lastScanResult.Data
+            var items = from kv in _lastScanResult.dictData
                         orderby kv.Value.Size descending
                         select new
                         {
@@ -476,10 +476,10 @@ Implementation notes (from the code)
 
     private async Task RedrawTreemapAsync()
     {
-        if (_lastScanResult == null || _lastScanResult.Data.IsEmpty)
+        if (_lastScanResult == null || _lastScanResult.dictData.IsEmpty)
             return;
 
-        var dict = _lastScanResult.Data;
+        var dict = _lastScanResult.dictData;
         TreeCanvas.Children.Clear();
 
         // Use the recorded scan root if available; otherwise fall back to inferring the root key
@@ -618,11 +618,10 @@ Implementation notes (from the code)
                 return;
             }
 
-            var dict = scanResult.Data;
             onScanComplete(scanResult);
 
             // Build summary
-            summary = $"Items: {dict.Count:n0}";
+            summary = $"Items: {scanResult.dictData.Count:n0}";
             if (scanResult.SkippedSymlinks > 0)
                 summary += $", Symlinks: {scanResult.SkippedSymlinks}";
             if (scanResult.CloudFileCount > 0)
@@ -649,14 +648,14 @@ Implementation notes (from the code)
                     System.Diagnostics.Debug.WriteLine($"  ... and {scanResult.Errors.Count - 10} more errors");
             }
 
-            if (dict.IsEmpty)
+            if (scanResult.dictData.IsEmpty)
             {
                 StatusText.Text = "No items found";
                 return;
             }
 
             // Phase 2: Rendering
-            progressWindow.SetPhase($"🎨 Rendering {dict.Count:n0} items...");
+            progressWindow.SetPhase($"🎨 Rendering {scanResult.dictData.Count:n0} items...");
             progressWindow.ReportProgress(0);
 
             treeCanvas.Children.Clear();
@@ -665,7 +664,7 @@ Implementation notes (from the code)
             string? rootKey = scanResult.RootPath;
             if (rootKey == null)
             {
-                foreach (var k in dict.Keys)
+                foreach (var k in scanResult.dictData.Keys)
                 {
                     if (k.EndsWith(TreeMapConstants.PathSep.ToString()))
                     {
@@ -675,10 +674,10 @@ Implementation notes (from the code)
             }
             rootKey ??= path + TreeMapConstants.PathSep;
 
-            long total = dict.TryGetValue(rootKey, out MapDataItem? value) ? value.Size : 0;
+            long total = scanResult.dictData.TryGetValue(rootKey, out MapDataItem? value) ? value.Size : 0;
             if (total == 0)
             {
-                foreach (var v in dict.Values) total += v.Size;
+                foreach (var v in scanResult.dictData.Values) total += v.Size;
             }
 
             // Calculate canvas bounds
@@ -691,7 +690,7 @@ Implementation notes (from the code)
             treeCanvas.Height = rect.Height;
 
             // Render with progress (pass existing progress window)
-            await TreemapPort.MakeTreemapAsync(dict, treeCanvas, rootKey, rect, total, true, cts, progressWindow);
+            await TreemapPort.MakeTreemapAsync(scanResult.dictData, treeCanvas, rootKey, rect, total, true, cts, progressWindow);
 
             StatusText.Text = summary;
         }
