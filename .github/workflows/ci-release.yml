@@ -50,44 +50,46 @@ jobs:
         run: |
           dotnet publish TreeMap/TreeMap.csproj -c Release -r ${{ matrix.rid }} \
             --self-contained true /p:PublishSingleFile=true -o ./artifacts/${{ matrix.rid }}
+      - name: Zip artifact
+        run: |
+          cd ./artifacts/${{ matrix.rid }}
+          zip -r ../TreeMap-${{ matrix.rid }}.zip .
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TreeMap-${{ matrix.rid }}
-          path: ./artifacts/${{ matrix.rid }}
+          path: ./artifacts/TreeMap-${{ matrix.rid }}.zip
 
   create-release:
     name: Create GitHub Release and attach artifacts
     needs: publish-artifacts
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Download Windows artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: TreeMap-win-x64
-          path: ./artifacts/win-x64 || true
-      - name: Download Linux artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: TreeMap-linux-x64
-          path: ./artifacts/linux-x64 || true
-      - name: Download macOS artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: TreeMap-osx-x64
-          path: ./artifacts/osx-x64 || true
+          path: ./artifacts
+          merge-multiple: false
+      - name: List artifacts
+        run: find ./artifacts -type f
       - name: Create release and upload assets
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body: |
-            Release ${{ github.ref_name }}
-          files: |
-            ./artifacts/win-x64/*
-            ./artifacts/linux-x64/*
-            ./artifacts/osx-x64/*
+            ## TreeMap ${{ github.ref_name }}
+
+            ### Downloads
+            - **Windows (x64)**: TreeMap-win-x64.zip
+            - **Linux (x64)**: TreeMap-linux-x64.zip
+            - **macOS (x64)**: TreeMap-osx-x64.zip
+
+            Extract and run the executable for your platform.
+          artifacts: ./artifacts/**/*.zip
+          artifactErrorsFailBuild: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
