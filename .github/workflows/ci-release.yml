@@ -91,5 +91,7 @@ jobs:
             Extract and run the executable for your platform.
           artifacts: ./artifacts/**/*.zip
           artifactErrorsFailBuild: true
+          allowUpdates: true
+          replacesArtifacts: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
