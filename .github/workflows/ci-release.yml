@@ -49,16 +49,25 @@ jobs:
       - name: Publish (${{ matrix.rid }})
         run: |
           dotnet publish TreeMap/TreeMap.csproj -c Release -r ${{ matrix.rid }} \
-            --self-contained true /p:PublishSingleFile=true -o ./artifacts/${{ matrix.rid }}
-      - name: Zip artifact
+            --self-contained true \
+            /p:PublishSingleFile=true \
+            /p:IncludeNativeLibrariesForSelfExtract=true \
+            /p:IncludeAllContentForSelfExtract=true \
+            -o ./artifacts/${{ matrix.rid }}
+      - name: Prepare artifact
         run: |
           cd ./artifacts/${{ matrix.rid }}
-          zip -r ../TreeMap-${{ matrix.rid }}.zip .
+          # Rename exe for clarity (Windows has .exe, others don't)
+          if [ "${{ matrix.rid }}" = "win-x64" ]; then
+            mv TreeMap.exe ../TreeMap-${{ matrix.rid }}.exe
+          else
+            mv TreeMap ../TreeMap-${{ matrix.rid }}
+          fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: TreeMap-${{ matrix.rid }}
-          path: ./artifacts/TreeMap-${{ matrix.rid }}.zip
+          path: ./artifacts/TreeMap-${{ matrix.rid }}*
 
   create-release:
     name: Create GitHub Release and attach artifacts
@@ -84,12 +93,11 @@ jobs:
             ## TreeMap ${{ github.ref_name }}
 
             ### Downloads
-            - **Windows (x64)**: TreeMap-win-x64.zip
-            - **Linux (x64)**: TreeMap-linux-x64.zip
-            - **macOS (x64)**: TreeMap-osx-x64.zip
-
-            Extract and run the executable for your platform.
-          artifacts: ./artifacts/**/*.zip
+            Download the single executable for your platform (no installation required):
+            - **Windows (x64)**: `TreeMap-win-x64.exe`
+            - **Linux (x64)**: `TreeMap-linux-x64` (run `chmod +x` first)
+            - **macOS (x64)**: `TreeMap-osx-x64` (run `chmod +x` first)
+          artifacts: ./artifacts/**/*
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
